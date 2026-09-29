@@ -100,7 +100,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let token = localStorage.getItem("cc_admin_token") || "";
-let devices = [], models = [], logDevice = null, logTimer = null;
+let devices = [], engines = {}, logDevice = null, logTimer = null;
 
 function toast(msg, ok=true) {
   const t = $("toast"); t.textContent = msg;
@@ -148,7 +148,7 @@ function ago(ts) {
 async function refresh() {
   try {
     const j = await api("/api/admin/devices");
-    devices = j.devices; models = j.models;
+    devices = j.devices; engines = j.engines || {};
     renderDevices(); renderChatDevs();
   } catch (e) { /* token 失效会自行跳登录 */ }
 }
@@ -167,10 +167,11 @@ function renderDevices() {
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span></td>
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
       <td><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}<br>
-          <span style="font-size:12px;color:#94a3b8">${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
+          <span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
           ${dep.tunnel_url ? `<br><a class="mono" href="${dep.tunnel_url}" target="_blank">${dep.tunnel_url}</a>` : ""}</td>
       <td><div class="row">
-        <select id="m_${d.device_id}">${models.map(m => `<option ${m === (dep.model||models[0]) ? "selected" : ""}>${m}</option>`).join("")}</select>
+        <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
+        <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
         <button class="sm" onclick="deploy('${d.device_id}')">部署</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
@@ -185,16 +186,24 @@ function renderChatDevs() {
   const online = devices.filter(d => d.deploy && d.deploy.tunnel_url);
   const sel = $("chatDev");
   const cur = sel.value;
-  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.model||"")}）</option>`).join("");
+  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.engine||"")} · ${esc(d.deploy.model||"")}）</option>`).join("");
   if (online.find(d => d.device_id === cur)) sel.value = cur;
   const d = online.find(x => x.device_id === sel.value);
-  $("chatMeta").textContent = d ? d.deploy.tunnel_url : "无在线模型设备";
+  $("chatMeta").textContent = d ? `${d.deploy.engine||""} ${d.deploy.tunnel_url}` : "无在线模型设备";
 }
 
+window.engineChanged = id => {
+  const e = $("e_" + id).value;
+  const m = $("m_" + id);
+  m.innerHTML = (engines[e]||[]).map(x => `<option>${x}</option>`).join("");
+  const dep = (devices.find(d => d.device_id === id)||{}).deploy||{};
+  if (engines[e] && engines[e].includes(dep.model)) m.value = dep.model;
+};
 window.deploy = async id => {
+  const engine = $("e_" + id).value;
   const model = $("m_" + id).value;
-  if (!confirm(`在设备 ${id} 上部署 ${model}？`)) return;
-  try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, model }) });
+  if (!confirm(`在设备 ${id} 上部署 ${engine} · ${model}？`)) return;
+  try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine, model }) });
         toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
@@ -236,15 +245,17 @@ function usageBars(u) {
        + barHtml(`内存 ${u.mem_used_gb ?? "-"}/${u.mem_total_gb ?? "-"}G ${u.mem_pct ?? "-"}%`, u.mem_pct)
        + (u.gpu_util_pct != null ? barHtml(`GPU ${u.gpu_util_pct}% ${gpuMem}`, u.gpu_util_pct) : "");
 }
-// 部署节点 → 总进度权重（model_pull 占 50~90，用真实下载百分比内插）
+// 部署节点 → 总进度权重（model_pull/engine_start 占 50~90；vllm/sglang 引擎步含权重下载）
 const STEP_W = { gpu_check: 5, docker: 10, mirrors: 15, gpu_toolkit: 25, pull_images: 40,
-                 ollama_start: 50, model_pull: 90, gateway: 94, tunnel: 97, verify: 100 };
+                 engine_start: 50, model_pull: 90, gateway: 94, tunnel: 97, verify: 100 };
 function deployPct(dep) {
   if (!dep || !dep.state) return 0;
   if (dep.state === "online") return 100;
   if (dep.state === "queued") return 2;
   if (dep.state === "idle" || dep.state === "stopped") return 0;
-  if (dep.step === "model_pull") {
+  if (dep.step === "model_pull" || dep.step === "engine_start") {
+    // vllm/sglang 没有独立 model_pull：engine_start 即含权重下载，直接给 90 档
+    if (dep.step === "engine_start" && dep.engine && dep.engine !== "ollama") return 90;
     const m = /(\d+)\s*%/.exec(dep.detail || "");
     if (m) return Math.min(90, 50 + Math.round(40 * parseInt(m[1]) / 100));
   }

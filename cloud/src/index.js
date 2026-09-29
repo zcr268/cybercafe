@@ -5,7 +5,16 @@
 // - 静态管理 UI（assets）
 
 const DEFAULT_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent";
-const MODELS = ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct-q4_k_m", "llama3.1:8b"];
+
+// 引擎 × 模型 目录：UI 引擎下拉 + 模型级联下拉的源数据；部署指令携带 engine 字段
+// - ollama 走 Ollama 仓库 tag；vllm/sglang 走 HuggingFace 模型 id（HF_ENDPOINT=hf-mirror 拉权重）
+// - vLLM 镜像 v0.4.1 / SGLang v0.4.1.post4-cu121 为 CUDA 12.1 基底，兼容该机驱动 535.274.02（CUDA 12.2）
+const ENGINES = {
+  ollama: ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct-q4_k_m", "llama3.1:8b"],
+  vllm: ["Qwen/Qwen2-7B-Instruct-AWQ", "Qwen/Qwen2-1.5B-Instruct-AWQ"],
+  sglang: ["Qwen/Qwen2.5-7B-Instruct-AWQ", "Qwen/Qwen2.5-14B-Instruct-AWQ"],
+};
+const MODELS = Object.values(ENGINES).flat();
 
 // ---------- 工具 ----------
 
@@ -155,7 +164,7 @@ async function handleAdminDevices(env) {
     devices.push(rec);
   }
   devices.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
-  return json({ ok: true, devices, models: MODELS });
+  return json({ ok: true, devices, models: MODELS, engines: ENGINES });
 }
 
 async function handleAdminNewDevice(request, env, origin) {
@@ -173,9 +182,13 @@ async function handleAdminNewDevice(request, env, origin) {
 async function handleAdminDeploy(request, env) {
   const body = await request.json().catch(() => ({}));
   if (!body.device_id) return json({ error: "device_id required" }, 400);
-  const model = MODELS.includes(body.model) ? body.model : MODELS[0];
+  const engine = Object.prototype.hasOwnProperty.call(ENGINES, body.engine) ? body.engine : "ollama";
+  const models = ENGINES[engine] || [];
+  const model = models.includes(body.model) ? body.model : models[0];
+  if (!model) return json({ error: `engine ${engine} has no models` }, 400);
   const cmd = {
     type: "deploy",
+    engine,
     model,
     api_key: randKey("sk-"),
     created_at: Math.floor(Date.now() / 1000),
@@ -185,7 +198,7 @@ async function handleAdminDeploy(request, env) {
   await env.CYBERCAFE_KV.delete(`log:${body.device_id}`);
   const key = `device:${body.device_id}`;
   const rec = (await env.CYBERCAFE_KV.get(key, "json")) || { device_id: body.device_id };
-  rec.deploy = { state: "queued", model, ts: Math.floor(Date.now() / 1000) };
+  rec.deploy = { state: "queued", engine, model, ts: Math.floor(Date.now() / 1000) };
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
   return json({ ok: true, command: { ...cmd, api_key: undefined } });
 }

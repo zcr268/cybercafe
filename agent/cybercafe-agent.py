@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -203,15 +203,46 @@ def report_progress(step, state, detail=""):
          {"device_id": device_id(), "step": step, "state": state,
           "detail": detail[:500], "ts": int(time.time())})
 
-def report_deploy_result(ok, tunnel_url="", api_key="", model=""):
+def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
     heartbeat({"deploy": {"state": "online" if ok else "failed",
-                          "model": model, "tunnel_url": tunnel_url,
+                          "engine": engine, "model": model,
+                          "tunnel_url": tunnel_url,
                           "model_api_key": api_key, "ts": int(time.time())}})
 
 # ---------------------------------------------------------------- 部署流水线
 
 REGISTRY_MIRRORS = ["https://docker.m.daocloud.io", "https://docker.1ms.run",
                     "https://docker.xuanyuan.me"]
+
+# 引擎定义：容器内监听端口统一映射到宿主 127.0.0.1:11434（nginx 网关不变）
+# - vLLM v0.4.1 / SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像，
+#   兼容该机驱动 535.274.02（nvidia-smi CUDA 12.2），HF 权重走 hf-mirror
+ENGINES = {
+    "ollama": {
+        "image": "ollama/ollama:latest",
+        "container": "ollama",
+        "port": "11434",
+        "volume": "ollama:/root/.ollama",
+        "args": [],
+    },
+    "vllm": {
+        "image": "vllm/vllm-openai:v0.4.1",
+        "container": "vllm",
+        "port": "8000",
+        "volume": "vllm-hf:/root/.cache/huggingface",
+        "args": ["--model", "{model}", "--host", "0.0.0.0", "--port", "8000",
+                 "--quantization", "awq"],
+    },
+    "sglang": {
+        "image": "lmsysorg/sglang:v0.4.1.post4-cu121",
+        "container": "sglang",
+        "port": "30000",
+        "volume": "sglang-hf:/root/.cache/huggingface",
+        "args": ["python3", "-m", "sglang.launch_server",
+                 "--model-path", "{model}", "--host", "0.0.0.0", "--port", "30000",
+                 "--quantization", "awq"],
+    },
+}
 
 class DeployError(Exception):
     pass
@@ -268,29 +299,70 @@ def step_gpu_toolkit():
     time.sleep(3)
     return "nvidia-container-toolkit 安装完成"
 
-def step_pull_images():
-    images = ["ollama/ollama:latest", "nginx:alpine", "cloudflare/cloudflared:latest"]
+def step_pull_images(engine):
+    images = [ENGINES[engine]["image"], "nginx:alpine", "cloudflare/cloudflared:latest"]
     for img in images:
         rc, out = run("docker pull %s" % img, timeout=1800)
         if rc != 0:
             raise DeployError("拉取镜像失败 %s: %s" % (img, out[-300:]))
     return "镜像就绪: " + ", ".join(images)
 
-def step_ollama_start():
-    rc, out = run("docker ps --filter name=^/ollama$ --filter status=running -q")
-    if out.strip():
-        return "ollama 已在运行"
-    run("docker rm -f ollama")
-    rc, out = run("docker run -d --name ollama --gpus all --restart unless-stopped "
-                  "-p 127.0.0.1:11434:11434 -v ollama:/root/.ollama ollama/ollama:latest", timeout=120)
+def _engine_running(container):
+    rc, out = run("docker ps --filter name=^/%s$ --filter status=running -q" % container)
+    return out.strip() != ""
+
+def step_engine_start(engine, model, progress_cb):
+    """启动推理引擎容器（ollama/vllm/sglang），统一暴露 OpenAI 兼容 API 到 127.0.0.1:11434。
+
+    vllm/sglang 首次启动会在容器内从 HF（hf-mirror）下载权重，耗时较长，
+    期间每 15s 回报一次进度；就绪判定轮询 /v1/models 返回 200。
+    """
+    cfg = ENGINES[engine]
+    container = cfg["container"]
+    # 引擎切换/重建：先清掉其它引擎容器，避免 11434 端口占用
+    for name, c in ENGINES.items():
+        if name != engine:
+            run("docker rm -f %s" % c["container"])
+    if _engine_running(container):
+        return "%s 已在运行" % engine
+    run("docker rm -f %s" % container)
+    args = [a.replace("{model}", model) for a in cfg["args"]]
+    # vllm/sglang 拉 HF 权重需走镜像站；PyTorch 多进程共享内存建议 --ipc host
+    envs = ""
+    ipc = ""
+    if engine in ("vllm", "sglang"):
+        envs = "-e HF_ENDPOINT=https://hf-mirror.com "
+        ipc = "--ipc host "
+    cmd = ("docker run -d --name %s --gpus all --restart unless-stopped "
+           "-p 127.0.0.1:11434:%s -v %s %s%s%s %s"
+           % (container, cfg["port"], cfg["volume"], envs, ipc, cfg["image"], " ".join(args)))
+    rc, out = run(cmd, timeout=180)
     if rc != 0:
-        raise DeployError("ollama 启动失败: " + out[-300:])
+        raise DeployError("%s 启动失败: %s" % (engine, out[-300:]))
+    if engine == "ollama":
+        return _wait_ollama_ready()
+    return _wait_openai_ready(engine, model, progress_cb)
+
+def _wait_ollama_ready():
     for _ in range(30):
         rc, out = run("curl -s http://127.0.0.1:11434/api/version", timeout=10)
         if rc == 0 and "version" in out:
             return "ollama 运行中: " + out.strip()
         time.sleep(2)
     raise DeployError("ollama 健康检查超时")
+
+def _wait_openai_ready(engine, model, progress_cb):
+    last_ts = time.time()
+    for i in range(240):  # 最长约 60 分钟（含首次 HF 权重下载）
+        rc, out = run("curl -s -m 10 http://127.0.0.1:11434/v1/models", timeout=15)
+        if rc == 0 and out.strip() and '"id"' in out:
+            return "%s 运行中: %s" % (engine, out.strip()[:200])
+        if time.time() - last_ts >= DEPLOY_HEARTBEAT_INTERVAL:
+            last_ts = time.time()
+            progress_cb("engine_start", "running",
+                        "%s 启动中（下载/加载权重，已等待 %ds）..." % (engine, i * 15))
+        time.sleep(15)
+    raise DeployError("%s 健康检查超时（60 分钟）" % engine)
 
 def step_model_pull(model, progress_cb):
     """流式拉取模型并回报百分比；失败时带上输出尾部便于诊断"""
@@ -400,18 +472,27 @@ def step_verify(tunnel_url, api_key):
     raise DeployError("公网隧道验证失败: http " + last)
 
 def deploy(cmd, progress_cb):
-    model = cmd.get("model", "qwen2.5:7b-instruct")
+    engine = cmd.get("engine") or "ollama"
+    if engine not in ENGINES:
+        raise DeployError("未知引擎: %s" % engine)
+    model = cmd.get("model", "")
     api_key = cmd.get("api_key", "")
     if not api_key:
         raise DeployError("指令缺少 api_key")
+    if not model:
+        raise DeployError("指令缺少 model")
+    # 环境步（gpu_check/docker/mirrors/gpu_toolkit）三引擎共用；引擎步按 engine 分支
     steps = [
         ("gpu_check",     "检测 GPU",        step_gpu_check),
         ("docker",        "安装/检查 Docker", step_docker),
         ("mirrors",       "配置镜像加速",      step_mirrors),
         ("gpu_toolkit",   "GPU 容器支持",     step_gpu_toolkit),
-        ("pull_images",   "拉取容器镜像",      step_pull_images),
-        ("ollama_start",  "启动推理引擎",      step_ollama_start),
-        ("model_pull",    "拉取模型 " + model, None),  # 特殊处理
+        ("pull_images",   "拉取容器镜像",      None),
+        ("engine_start",  "启动推理引擎",      None),
+    ]
+    if engine == "ollama":
+        steps.append(("model_pull", "拉取模型 " + model, None))
+    steps += [
         ("gateway",       "部署鉴权网关",      None),
         ("tunnel",        "建立公网隧道",      None),
         ("verify",        "端到端验证",       None),
@@ -420,7 +501,11 @@ def deploy(cmd, progress_cb):
     for step_id, title, fn in steps:
         progress_cb(step_id, "running", title)
         try:
-            if step_id == "model_pull":
+            if step_id == "pull_images":
+                detail = step_pull_images(engine)
+            elif step_id == "engine_start":
+                detail = step_engine_start(engine, model, progress_cb)
+            elif step_id == "model_pull":
                 detail = step_model_pull(model, progress_cb)
             elif step_id == "gateway":
                 detail = step_gateway(api_key)
@@ -438,14 +523,14 @@ def deploy(cmd, progress_cb):
         except Exception as e:
             progress_cb(step_id, "fail", "%s: %s" % (type(e).__name__, e))
             raise DeployError(str(e))
-    return tunnel_url, api_key, model
+    return tunnel_url, api_key, engine, model
 
 # ---------------------------------------------------------------- 其他指令
 
 def cmd_stop():
-    run("docker rm -f cloudflared chatgw ollama")
+    run("docker rm -f cloudflared chatgw %s" % " ".join(e["container"] for e in ENGINES.values()))
     heartbeat({"deploy": {"state": "stopped", "ts": int(time.time())}})
-    return "已停止 ollama/chatgw/cloudflared 容器"
+    return "已停止 %s/chatgw/cloudflared 容器" % "/".join(ENGINES.keys())
 
 def cmd_restart_tunnel():
     run("docker rm -f cloudflared")
@@ -480,9 +565,9 @@ def handle_command(cmd):
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
     try:
         if ctype == "deploy":
-            report_progress("command", "running", "开始部署 %s" % cmd.get("model"))
-            tunnel_url, api_key, model = deploy(cmd, report_progress)
-            report_deploy_result(True, tunnel_url, api_key, model)
+            report_progress("command", "running", "开始部署 %s %s" % (cmd.get("engine"), cmd.get("model")))
+            tunnel_url, api_key, engine, model = deploy(cmd, report_progress)
+            report_deploy_result(True, tunnel_url, api_key, engine, model)
             log("部署完成: %s" % tunnel_url)
         elif ctype == "stop":
             log(cmd_stop())

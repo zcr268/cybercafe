@@ -43,8 +43,20 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 1. 打开云管理端 → 输入 ADMIN_TOKEN 登录
 2. 右上角「+ 添加设备」→ 复制生成的安装命令
 3. 在目标 Ubuntu 机器上以 root 执行该命令（形如 `curl -fsSL "https://<域名>/install.sh?key=cck-xxx" | bash`）
-4. 设备出现在列表后，选择模型点「部署」→ 日志区实时看节点进度（检测GPU→装Docker→镜像加速→GPU容器支持→拉镜像→启Ollama→拉模型→鉴权网关→建隧道→公网验证）
+4. 设备出现在列表后，选择引擎与模型点「部署」→ 日志区实时看节点进度（检测GPU→装Docker→镜像加速→GPU容器支持→拉镜像→启动引擎→[Ollama:拉模型]→鉴权网关→建隧道→公网验证）
 5. 部署完成后在右侧聊天面板直接对话（浏览器 → CF 隧道 → 机器模型，带 Key 鉴权）
+
+## 推理引擎（v0.3.0 起支持三引擎）
+
+| 引擎 | 镜像 | 模型（HF id / Ollama tag） | 说明 |
+|---|---|---|---|
+| `ollama` | `ollama/ollama:latest` | `qwen2.5:7b-instruct`、`qwen2.5:14b-instruct-q4_k_m`、`llama3.1:8b` | 默认引擎，`ollama pull` 拉模型 |
+| `vllm` | `vllm/vllm-openai:v0.4.1`（CUDA 12.1 基底） | `Qwen/Qwen2-7B-Instruct-AWQ`、`Qwen/Qwen2-1.5B-Instruct-AWQ` | OpenAI 兼容 API 端口 8000→宿主 11434；HF 权重走 `HF_ENDPOINT=https://hf-mirror.com` |
+| `sglang` | `lmsysorg/sglang:v0.4.1.post4-cu121`（CUDA 12.1 基底） | `Qwen/Qwen2.5-7B-Instruct-AWQ`、`Qwen/Qwen2.5-14B-Instruct-AWQ` | OpenAI 兼容 API 端口 30000→宿主 11434；HF 权重走 hf-mirror |
+
+- 三引擎统一以 OpenAI 兼容 API 暴露在 `127.0.0.1:11434`（nginx 鉴权网关不变），UI 聊天面板按设备当前引擎/模型发请求。
+- 镜像选择兼容该机驱动 535.274.02（nvidia-smi CUDA 12.2）：vLLM v0.4.1 与 SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像。
+- `stop` 指令会停止全部引擎容器（ollama/vllm/sglang）+ 网关 + 隧道。
 
 ## 安全模型
 

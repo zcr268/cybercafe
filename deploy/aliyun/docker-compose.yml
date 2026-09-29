@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/aliyun/Dockerfile
-    image: cybercafe-cloud:0.2.1
+    image: cybercafe-cloud:0.3.0
     environment:
       - ADMIN_TOKEN=${ADMIN_TOKEN:?missing}
       - GITHUB_RAW_BASE=${GITHUB_RAW_BASE:-https://cdn.jsdelivr.net/gh/zcr268/cybercafe@main/agent}
