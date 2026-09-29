@@ -6,6 +6,7 @@ services:
     image: cybercafe-cloud:0.2.1
     environment:
       - ADMIN_TOKEN=${ADMIN_TOKEN:?missing}
+      - GITHUB_RAW_BASE=${GITHUB_RAW_BASE:-https://cdn.jsdelivr.net/gh/zcr268/cybercafe@main/agent}
     volumes:
       - cybercafe-state:/data        # wrangler 本地 KV/Cache 持久化
     ports:
