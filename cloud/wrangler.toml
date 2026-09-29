@@ -1,0 +1,18 @@
+name = "cybercafe"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# 管理 UI 静态资源（/ 及非 /api 路径）
+[assets]
+directory = "./public"
+
+# KV 命名空间：在 Cloudflare 控制台创建后把真实 id 填到这里
+#   wrangler kv namespace create CYBERCAFE_KV
+[[kv_namespaces]]
+binding = "CYBERCAFE_KV"
+id = "__KV_NAMESPACE_ID__"
+
+# 非敏感配置；ADMIN_TOKEN 请用 secret 设置：
+#   wrangler secret put ADMIN_TOKEN
+[vars]
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent"

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberCafe 云管理</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0f172a; color: #e2e8f0; }
+  header { padding: 14px 20px; background: #1e293b; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #334155; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: #94a3b8; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1d4ed8; }
+  button.gray { background: #475569; } button.gray:hover { background: #64748b; }
+  button.red { background: #b91c1c; } button.red:hover { background: #991b1b; }
+  button.sm { padding: 3px 8px; font-size: 12px; }
+  select, input[type=text], input[type=password] { background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #334155; vertical-align: top; }
+  th { color: #94a3b8; font-weight: 500; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .dot.on { background: #22c55e; } .dot.off { background: #64748b; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .state { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .state.online { background: #14532d; color: #86efac; }
+  .state.deploying { background: #713f12; color: #fde047; }
+  .state.failed { background: #7f1d1d; color: #fca5a5; }
+  .state.queued { background: #1e3a8a; color: #93c5fd; }
+  .state.idle, .state.stopped { background: #334155; color: #cbd5e1; }
+  #login { max-width: 360px; margin: 15vh auto; }
+  #logbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 180px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
+  #chatbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 320px; overflow-y: auto; }
+  .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.5; }
+  .msg.user { background: #2563eb; margin-left: auto; }
+  .msg.bot { background: #334155; }
+  .chatin { display: flex; gap: 8px; margin-top: 10px; }
+  .chatin input { flex: 1; }
+  .toast { position: fixed; top: 14px; right: 14px; background: #065f46; padding: 10px 14px; border-radius: 8px; display: none; z-index: 9; font-size: 13px; max-width: 60vw; word-break: break-all; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  a { color: #60a5fa; }
+</style>
+</head>
+<body>
+<header>
+  <h1>☁️ CyberCafe 云管理</h1>
+  <span class="spacer"></span>
+  <button class="gray sm" id="btnAddDev">+ 添加设备</button>
+  <button class="gray sm" id="btnLogout">退出</button>
+</header>
+
+<div id="login" class="card" style="display:none">
+  <h2>管理员登录</h2>
+  <p style="color:#94a3b8;font-size:13px">输入 ADMIN_TOKEN（Cloudflare secret 中配置）</p>
+  <div class="row">
+    <input type="password" id="tokenIn" placeholder="ADMIN_TOKEN" style="flex:1">
+    <button id="btnLogin">登录</button>
+  </div>
+  <p id="loginErr" style="color:#fca5a5;font-size:12px"></p>
+</div>
+
+<main id="app" style="display:none">
+  <div class="card">
+    <h2>设备列表（每 5 秒自动刷新）</h2>
+    <table>
+      <thead><tr><th>设备</th><th>硬件</th><th>部署状态</th><th>操作</th></tr></thead>
+      <tbody id="devRows"></tbody>
+    </table>
+    <h2 style="margin-top:18px">部署进度日志 <span id="logWho" class="mono" style="color:#64748b"></span></h2>
+    <div id="logbox">（点击设备行的「日志」查看）</div>
+  </div>
+
+  <div class="card">
+    <h2>直连聊天（经 CF 隧道 → 机器模型 API）</h2>
+    <div class="row" style="margin-bottom:10px">
+      <select id="chatDev"></select>
+      <span id="chatMeta" class="mono" style="color:#64748b"></span>
+    </div>
+    <div id="chatbox"></div>
+    <div class="chatin">
+      <input type="text" id="chatIn" placeholder="输入消息，回车发送…">
+      <button id="btnSend">发送</button>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = localStorage.getItem("cc_admin_token") || "";
+let devices = [], models = [], logDevice = null, logTimer = null;
+
+function toast(msg, ok=true) {
+  const t = $("toast"); t.textContent = msg;
+  t.style.background = ok ? "#065f46" : "#7f1d1d";
+  t.style.display = "block";
+  setTimeout(() => t.style.display = "none", 5000);
+}
+
+async function api(path, opts={}) {
+  opts.headers = { ...(opts.headers||{}), "Authorization": "Bearer " + token,
+                   "Content-Type": "application/json" };
+  const r = await fetch(path, opts);
+  if (r.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+
+function showLogin() { $("login").style.display = "block"; $("app").style.display = "none"; }
+function showApp()   { $("login").style.display = "none"; $("app").style.display = "grid"; }
+
+$("btnLogin").onclick = async () => {
+  token = $("tokenIn").value.trim();
+  try { await api("/api/admin/devices"); localStorage.setItem("cc_admin_token", token); showApp(); refresh(); }
+  catch (e) { $("loginErr").textContent = "登录失败: " + e.message; }
+};
+$("btnLogout").onclick = () => { localStorage.removeItem("cc_admin_token"); token=""; showLogin(); };
+
+$("btnAddDev").onclick = async () => {
+  const label = prompt("设备备注（可空）:") || "";
+  try {
+    const j = await api("/api/admin/devices/new", { method: "POST", body: JSON.stringify({ label }) });
+    prompt("在该机器上执行以下命令完成安装（root）：", j.install_command);
+  } catch (e) { toast(e.message, false); }
+};
+
+function ago(ts) {
+  if (!ts) return "-";
+  const s = Math.floor(Date.now()/1000) - ts;
+  if (s < 60) return s + "s前";
+  if (s < 3600) return Math.floor(s/60) + "m前";
+  return Math.floor(s/3600) + "h前";
+}
+
+async function refresh() {
+  try {
+    const j = await api("/api/admin/devices");
+    devices = j.devices; models = j.models;
+    renderDevices(); renderChatDevs();
+  } catch (e) { /* token 失效会自行跳登录 */ }
+}
+
+function renderDevices() {
+  $("devRows").innerHTML = devices.map(d => {
+    const dep = d.deploy || {};
+    const hw = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
+      .filter(Boolean).join("<br>");
+    return `<tr>
+      <td><span class="dot ${d.online ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b><br>
+          <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span></td>
+      <td style="font-size:12px;color:#94a3b8">${hw || "-"}</td>
+      <td><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span><br>
+          <span style="font-size:12px;color:#94a3b8">${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
+          ${dep.tunnel_url ? `<br><a class="mono" href="${dep.tunnel_url}" target="_blank">${dep.tunnel_url}</a>` : ""}</td>
+      <td><div class="row">
+        <select id="m_${d.device_id}">${models.map(m => `<option ${m === (dep.model||models[0]) ? "selected" : ""}>${m}</option>`).join("")}</select>
+        <button class="sm" onclick="deploy('${d.device_id}')">部署</button>
+        <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
+        <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
+        <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
+        <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
+      </div></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
+}
+
+function renderChatDevs() {
+  const online = devices.filter(d => d.deploy && d.deploy.tunnel_url);
+  const sel = $("chatDev");
+  const cur = sel.value;
+  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.model||"")}）</option>`).join("");
+  if (online.find(d => d.device_id === cur)) sel.value = cur;
+  const d = online.find(x => x.device_id === sel.value);
+  $("chatMeta").textContent = d ? d.deploy.tunnel_url : "无在线模型设备";
+}
+
+window.deploy = async id => {
+  const model = $("m_" + id).value;
+  if (!confirm(`在设备 ${id} 上部署 ${model}？`)) return;
+  try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, model }) });
+        toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
+  catch (e) { toast(e.message, false); }
+};
+window.cmd = async (id, type) => {
+  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type }) });
+        toast("指令已下发: " + type); }
+  catch (e) { toast(e.message, false); }
+};
+window.delDev = async id => {
+  if (!confirm("删除设备 " + id + " 的记录？（不会卸载机器上的脚本）")) return;
+  try { await api("/api/admin/device/" + id, { method: "DELETE" }); refresh(); }
+  catch (e) { toast(e.message, false); }
+};
+window.viewLog = id => {
+  logDevice = id; $("logWho").textContent = "· " + id;
+  if (logTimer) clearInterval(logTimer);
+  const load = async () => {
+    try {
+      const j = await api("/api/admin/device/" + id);
+      $("logbox").innerHTML = j.logs.map(l =>
+        `<div>[${new Date(l.ts*1000).toLocaleTimeString()}] <b>${l.step}</b> ${l.state} — ${esc(l.detail)}</div>`).join("")
+        || "（暂无日志）";
+      $("logbox").scrollTop = $("logbox").scrollHeight;
+    } catch (e) {}
+  };
+  load(); logTimer = setInterval(load, 3000);
+};
+
+// ---------- 聊天 ----------
+function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+function addMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "user" ? "user" : "bot");
+  d.textContent = text;
+  $("chatbox").appendChild(d);
+  $("chatbox").scrollTop = $("chatbox").scrollHeight;
+  return d;
+}
+async function send() {
+  const id = $("chatDev").value;
+  const d = devices.find(x => x.device_id === id);
+  const text = $("chatIn").value.trim();
+  if (!text) return;
+  if (!d || !d.deploy || !d.deploy.tunnel_url) { toast("该设备没有可用隧道地址", false); return; }
+  $("chatIn").value = "";
+  addMsg("user", text);
+  const thinking = addMsg("bot", "…");
+  try {
+    const r = await fetch(d.deploy.tunnel_url + "/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "Authorization": "Bearer " + d.deploy.model_api_key },
+      body: JSON.stringify({ model: d.deploy.model, messages: [{ role: "user", content: text }] }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error && j.error.message || ("HTTP " + r.status));
+    thinking.textContent = j.choices[0].message.content;
+  } catch (e) {
+    thinking.textContent = "❌ " + e.message;
+  }
+}
+$("btnSend").onclick = send;
+$("chatIn").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+// ---------- 启动 ----------
+if (token) {
+  api("/api/admin/devices").then(() => { showApp(); refresh(); setInterval(refresh, 5000); })
+    .catch(() => showLogin());
+} else showLogin();
+</script>
+</body>
+</html>
