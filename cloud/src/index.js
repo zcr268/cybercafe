@@ -9,8 +9,10 @@
 //   ?t= bust 对 raw 与 jsDelivr 均无效（已移除）
 // - 韧性回退 jsDelivr @main：实测 query 被忽略、按路径缓存 s-maxage=12h——仅作兜底；
 //   aliyun 出口访问 raw 超时时自动回退，即使漏注入 GITHUB_RAW_BASE 也不会复现生产超时故障
-// - aliyun 生产首选通道 AGENT_LOCAL_DIR（compose 挂载仓库 agent/ 目录）：
-//   零外部依赖，git pull 后即时生效，不受任何 CDN 缓存影响
+// - aliyun 生产首选通道 AGENT_LOCAL_BASE：compose 把仓库 agent/ 只读挂载进静态资源目录
+//   public/_agent，dev server 每请求实时读盘，git pull 后即时生效、零外部依赖。
+//   （实测：本运行时 workerd 沙箱拒绝 node:fs 磁盘读、env.ASSETS 未注入，
+//     worker 经 loopback HTTP 取自身静态资源是唯一可靠本地通道）
 const DEFAULT_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent";
 const DEFAULT_JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/zcr268/cybercafe@main/agent";
 const FETCH_TIMEOUT_MS = 5000;
@@ -64,18 +66,18 @@ function jsdelivrBase(env) {
 }
 
 async function readLocalRepoFile(env, name) {
-  // 仅 wrangler dev / Node 环境可用；真实 CF Worker 无 node:fs，import 抛错 → 上层回退网络通道。
-  // 用变量形式写 specifier，避免 esbuild 在 CF 构建期静态解析 node:fs
-  const specifier = "node:fs/promises";
-  const { readFile } = await import(specifier);
-  return await readFile(`${env.AGENT_LOCAL_DIR}/${name}`, "utf8");
+  // 本地首选通道：AGENT_LOCAL_BASE 指向开发服务器自身静态资源（public/_agent 挂载了仓库 agent/）。
+  // 经 loopback HTTP 读取（实测 workerd 沙箱拒绝 node:fs 磁盘读、env.ASSETS 未注入）。
+  const resp = await fetch(`${env.AGENT_LOCAL_BASE.replace(/\/$/, "")}/${name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.text();
 }
 
 async function fetchRepoFile(env, name) {
-  // 通道 0：AGENT_LOCAL_DIR（aliyun 生产挂载仓库 agent/，即时生效、零外部依赖）
-  if (env.AGENT_LOCAL_DIR) {
+  // 通道 0：AGENT_LOCAL_BASE（aliyun 生产首选，compose 挂载仓库 agent/ → public/_agent）
+  if (env.AGENT_LOCAL_BASE) {
     try { return await readLocalRepoFile(env, name); }
-    catch (e) { /* 挂载缺失/不可读 → 网络通道兜底 */ }
+    catch (e) { /* 本地通道失败 → 网络通道兜底 */ }
   }
   // 通道 1/2：raw 主 + jsDelivr 回退（自适应顺序，各 5s 超时）
   const raw = `${rawBase(env)}/${name}`;
