@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 HEARTBEAT_INTERVAL = 10         # 心跳间隔（秒）
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -314,13 +314,12 @@ def step_gateway(api_key):
     return "网关就绪（带Key鉴权+CORS）"
 
 def step_tunnel():
-    rc, out = run("docker ps --filter name=^/cloudflared$ --filter status=running -q")
-    if not out.strip():
-        run("docker rm -f cloudflared")
-        rc, out = run("docker run -d --name cloudflared --network host --restart unless-stopped "
-                      "cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://127.0.0.1:8000", timeout=120)
-        if rc != 0:
-            raise DeployError("cloudflared 启动失败: " + out[-300:])
+    # 总是重建：快速隧道每次会话域名随机，复用旧容器会拿到日志里的过期域名
+    run("docker rm -f cloudflared")
+    rc, out = run("docker run -d --name cloudflared --network host --restart unless-stopped "
+                  "cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://127.0.0.1:8000", timeout=120)
+    if rc != 0:
+        raise DeployError("cloudflared 启动失败: " + out[-300:])
     url = ""
     for _ in range(40):
         rc, out = run("docker logs cloudflared 2>&1")
@@ -334,11 +333,15 @@ def step_tunnel():
     return url
 
 def step_verify(tunnel_url, api_key):
-    rc, out = run('curl -s -m 60 -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" %s/v1/models'
-                  % (api_key, tunnel_url), timeout=90)
-    if out.strip() != "200":
-        raise DeployError("公网隧道验证失败: http " + out.strip())
-    return "公网可达: " + tunnel_url
+    last = ""
+    for _ in range(4):  # 隧道刚建立时边缘可能短暂 530，重试几次
+        rc, out = run('curl -s -m 60 -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" %s/v1/models'
+                      % (api_key, tunnel_url), timeout=90)
+        last = out.strip()
+        if last == "200":
+            return "公网可达: " + tunnel_url
+        time.sleep(10)
+    raise DeployError("公网隧道验证失败: http " + last)
 
 def deploy(cmd, progress_cb):
     model = cmd.get("model", "qwen2.5:7b-instruct")
