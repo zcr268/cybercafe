@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 HEARTBEAT_INTERVAL = 10         # 心跳间隔（秒）
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -285,6 +285,7 @@ NGINX_CONF_TMPL = """server {{
         }}
         proxy_pass http://127.0.0.1:11434;
         proxy_set_header Host $host;
+        proxy_set_header Origin "";
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }}
