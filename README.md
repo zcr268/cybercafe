@@ -66,6 +66,7 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 ## 项目工作规矩（用户 2026-09-29 明确，每次开发必须执行）
 
 1. **本地 = 长期快速调试开发沙箱**：本机 wrangler dev（127.0.0.1:8788，ADMIN_TOKEN=dev-admin-token-8848）与临时隧道（trycloudflare.com）是**永久保留的快速调试/开发环境，不存在「下线」操作**——生产云管（aliyun）负责正式链路，本地沙箱负责开发与验收并行推进（云管理端开发、引擎支持开发、后续一切开发），两边同时跑、互不替代。
+   - **域名约定**：本地验证域名**一直使用临时隧道域名**（trycloudflare.com 快速隧道，每次隧道重建会变成新随机域名，agent 心跳自动上报最新地址）；固定域名 `cybercafe.akkak.kdns.fr` **仅生产（aliyun）使用**。
 2. **最终收敛**：每轮改动的最终产物必须收敛到 **GitHub 仓库（zcr268/cybercafe）** 与 **aliyun**（`ssh aliyun`，`~/work/cybercafe`，deploy/aliyun 可部署形态）。本地修改推回前先 `git pull --rebase` 防冲突，并同步部署到 aliyun。
 3. **真实路径红线**：开发与验收的端到端验证必须走真实路径（真实机器 / 真实容器 / 真实网络传输），禁止 mock 冒充。
 4. **本地仓库目录纪律**：不随手改动本地已有目录文件；涉及阿里云侧修复直接在 aliyun 上改并提交，开发用独立克隆（如 /tmp/cybercafe-*）。
