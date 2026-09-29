@@ -22,7 +22,7 @@
 set -euo pipefail
 
 HOST="${SYNC_HOST:-aliyun}"
-DIR="${SYNC_DIR:-~/work/cybercafe}"
+DIR="${SYNC_DIR:-/root/work/cybercafe}"   # aliyun ssh 用户为 root；SYNC_DIR 覆盖时请用绝对路径
 BRANCH="${SYNC_BRANCH:-main}"
 REMOTE_URL="https://github.com/zcr268/cybercafe.git"
 BUNDLE="/tmp/cybercafe-${BRANCH}.bundle"
@@ -32,7 +32,7 @@ die() { printf '\033[1;31m[cybercafe-sync ERROR]\033[0m %s\n' "$*" >&2; exit 1; 
 
 check_ssh() {
   ssh -o ConnectTimeout=10 -o BatchMode=yes "$HOST" 'true' \
-    || die "无法 ssh 到 $HOST（检查 ~/.ssh/config 别名与密钥）"
+    || die "无法 ssh 到 ${HOST}（检查 ~/.ssh/config 别名与密钥）"
 }
 
 local_head()  { git rev-parse HEAD; }
@@ -47,18 +47,18 @@ cmd_status() {
   say "GitHub $BRANCH = $rh"
   say "aliyun $BRANCH = $ah"
   if [ "$ah" = "$rh" ]; then say "aliyun ↔ GitHub 一致 ✓"; else say "aliyun ↔ GitHub 不一致（落后或分叉）"; fi
-  if [ "$lh" = "$rh" ]; then say "本机 ↔ GitHub 一致 ✓"; else say "本机 ↔ GitHub 不一致（先 git merge --ff-only origin/$BRANCH）"; fi
+  if [ "$lh" = "$rh" ]; then say "本机 ↔ GitHub 一致 ✓"; else say "本机 ↔ GitHub 不一致（先 git merge --ff-only origin/${BRANCH}）"; fi
   if [ "$lh" = "$ah" ]; then say "本机 ↔ aliyun 一致 ✓"; fi
 }
 
 bundle_from_local() {
   git status --porcelain | grep -q . && die "本机工作区有未提交改动，请先 commit 或 stash"
-  say "创建 bundle（$BRANCH）..."
+  say "创建 bundle（${BRANCH}）..."
   git bundle create "$BUNDLE" "$BRANCH" >/dev/null
 }
 
 apply_bundle_aliyun() {
-  # bundle 已传至 aliyun $BUNDLE：verify → fetch 到 refs/remotes/bundle/<branch> → 仅 ff 合并
+  # bundle 已传至 aliyun ${BUNDLE}：verify → fetch 到 refs/remotes/bundle/<branch> → 仅 ff 合并
   ssh "$HOST" bash -s <<REMOTE
 set -euo pipefail
 cd "$DIR"
