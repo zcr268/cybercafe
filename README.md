@@ -99,7 +99,7 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 
 要点：
 - **实测结论**：jsDelivr 与 raw.githubusercontent 都忽略 URL query 参与缓存键（已实测验证 `?t=` 破缓存无效），旧代码的 60s 窗口 query bust 已移除，改为「自适应双通道 + 5s 超时自动回退 + 本地挂载」。
-- **默认值即生产可用**：`DEFAULT_RAW_BASE` 未改变的部署环境即使漏注入 `GITHUB_RAW_BASE`，raw 不通时自动回退 jsDelivr，不会复现 aliyun 出口超时故障；aliyun 容器配置见 `deploy/aliyun/docker-compose.yml`（挂载 `../agent:/app/agent:ro` + `AGENT_LOCAL_DIR=/app/agent`）。
+- **默认值即生产可用**：`DEFAULT_RAW_BASE` 未改变的部署环境即使漏注入 `GITHUB_RAW_BASE`，raw 不通时自动回退 jsDelivr，不会复现 aliyun 出口超时故障；aliyun 容器配置见 `deploy/aliyun/docker-compose.yml`（挂载 `../../agent:/app/agent:ro` + `AGENT_LOCAL_DIR=/app/agent`，相对路径以 compose 文件目录 `deploy/aliyun/` 为基准）。
 - 新环境部署建议：CF Workers 用默认 raw 即可；容器类部署仿照 aliyun 挂载 `agent/` 并设置 `AGENT_LOCAL_DIR`。
 
 ## 注意

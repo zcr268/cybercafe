@@ -14,7 +14,8 @@ services:
       - cybercafe-state:/data        # wrangler 本地 KV/Cache 持久化
       # 实时提供 agent/ 文件（install.sh / cybercafe-agent.py）：git pull 后即时生效，
       # 不受 raw/jsDelivr 任何 CDN 缓存影响；只读挂载，不改动宿主机仓库
-      - ../agent:/app/agent:ro
+      # 注意：相对路径以 compose 文件（deploy/aliyun/）为基准，仓库根在 ../../ 两层之上
+      - ../../agent:/app/agent:ro
     ports:
       - "127.0.0.1:8080:8080"        # 只对本机暴露，由 cloudflared 出公网
     restart: unless-stopped
