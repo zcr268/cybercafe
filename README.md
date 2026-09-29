@@ -1,7 +1,6 @@
 # CyberCafe 云网咖模型管控
 
 「云端管 + 本地跑」的远程模型部署管控系统，三部分组成：
-
 ```
 ┌──────────────────────────────┐
 │ ① 云管理端 cloud/             │   Cloudflare Worker + KV + 静态UI
@@ -63,3 +62,10 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 
 - 目标机器需要 NVIDIA GPU + Ubuntu（脚本会自动安装 docker / nvidia-container-toolkit / 配置国内镜像加速）
 - 隧道使用 cloudflared 快速隧道，容器重建后域名会变——agent 会自动把新域名随心跳上报，云管端聊天页永远使用最新地址
+
+## 项目工作规矩（用户 2026-09-29 明确，每次开发必须执行）
+
+1. **生产验收前的本地并行开发**：t3 生产云管端全链路验收完成之前，所有开发与验收（云管理端开发、引擎支持开发、以及后续一切开发）都可在**本地环境并行推进**——本地 wrangler dev（127.0.0.1:8788，ADMIN_TOKEN=dev-admin-token-8848）或临时隧道沙箱，不等待生产链路就绪。
+2. **最终收敛**：每轮改动的最终产物必须收敛到 **GitHub 仓库（zcr268/cybercafe）** 与 **aliyun**（`ssh aliyun`，`~/work/cybercafe`，deploy/aliyun 可部署形态）。本地修改推回前先 `git pull --rebase` 防冲突，并同步部署到 aliyun。
+3. **真实路径红线**：开发与验收的端到端验证必须走真实路径（真实机器 / 真实容器 / 真实网络传输），禁止 mock 冒充。
+4. **本地仓库目录纪律**：不随手改动本地已有目录文件；涉及阿里云侧修复直接在 aliyun 上改并提交，开发用独立克隆（如 /tmp/cybercafe-*）。
