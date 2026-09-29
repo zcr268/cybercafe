@@ -15,10 +15,10 @@
 - ✅ 官方明确支持拆分拓扑：ModelSphere 文档首句即「**Any conformant Kubernetes cluster runs this stack**」，并给出纯工作节点 `kubeadm join` 的标准做法；k3s 的「server（控制面）+ agent（工作节点）」架构是官方一等公民形态，agent 最低仅需 **1 核 / 512MB**。
 - ✅ 官方/NVIDIA 均支持「工作节点预装驱动 + gpu-operator 不装驱动」模式；引擎 chart（sglang/vllm）**不依赖 runtimeClassName**，靠 containerd 默认 runtime 注入 GPU——k3s 上由 gpu-operator toolkit 以 `CONTAINERD_SET_AS_DEFAULT=true` 达成，NVIDIA 官方支持 k3s 平台。
 - ✅ 资源可承受：工作机常驻平台开销（k3s agent + flannel + gpu-operator DaemonSet + 引擎 POD）预估 **2~4GB 内存 / 0.5~1 核**，31GB 内存/16GB 显存的 A001-10-003 足够。
-- ⚠️ **硬性前置条件（风险）**：管理机与工作机之间需要**双向网络可达**（k3s 反隧道只覆盖 agent→server 的 apiserver 通道；跨节点 Pod 流量走 flannel VXLAN 8472 UDP、kubelet 10250 需要双向）。若工作机像多数网咖机一样**仅出网可达（NAT 后）**，跨节点集群网络是否可用需真机验证——不通则回退方案（见 §7）。
+- ℹ️ **网络前提（已按用户 2026-10-02 指示从考虑项移除）**：管理机未来部署在集群内部（内网），管理机↔工作机**双向可达是既定前提**，不再验证、不再准备降级方案。附录 §10 的 PoC 清单已按此新口径精简。
 - ⚠️ 沿用 t5 的成熟度风险（项目上线 <2 周、无 release/tag）与 CUDA 兼容性不确定（默认引擎镜像 cu129 vs 驱动 535，建议自建 cu122 镜像）。
 
-**建议**：若网络条件允许，采用 **k3s 拆分拓扑（管理机=server，工作机=agent-only）** 做 PoC，最快一天内可出结果；PoC 通过后再谈 agent 流水线集成。
+**建议**：采用 **k3s 拆分拓扑（管理机=server，工作机=agent-only）** 做 PoC；真机恢复/新机器分配后按 §10 新口径清单执行，结论只需回答「部署成功没有；若失败，阻塞在哪一步（阻塞点+原因）」。
 
 ---
 
@@ -169,7 +169,7 @@ k3s agent（= kubelet + containerd + flannel + kube-proxy）
 
 ### 7.1 结论
 
-**有条件可行**。条件 = ① 管理机可用（≥4 核/8GB）；② 管理机↔工作机**双向网络可达**（flannel VXLAN 8472 UDP + kubelet 10250；若不可达则本方案降级，见 7.3）；③ 引擎镜像换 cu122 或先冒烟 cu129；④ 接受 t5 已列明的项目成熟度风险（建议 PoC 先行）。
+**有条件可行**。条件 = ① 管理机可用（≥4 核/8GB）；② 管理机↔工作机双向可达（**已按用户 2026-10-02 指示为内网既定前提，不再考虑**）；③ 引擎镜像换 cu122 或先冒烟 cu129；④ 接受 t5 已列明的项目成熟度风险（建议 PoC 先行）。
 
 ### 7.2 管理面拆分建议
 
@@ -199,7 +199,7 @@ k3s agent（= kubelet + containerd + flannel + kube-proxy）
 
 ### 7.5 风险点（新增，t5 之外）
 
-1. **网络可达性（高）**：k3s 反隧道只保证 agent→server 的 apiserver 通道；**跨节点 Pod 流量（flannel VXLAN 8472 UDP）与 kubelet 10250 需双向可达**。网咖机若 NAT 后仅出网，可能不通 → 降级方案：①管理机与工作机放同一内网/做隧道互通；②改 flannel WireGuard 后端（51820 UDP，仍需双向）；③回退「工作机本地单机 k3s server」（管理面组件也放工作机，放弃拆分）或 t5 的 llm-openresty 容器方案。**该点必须真机验证（待验证）。**
+1. **网络可达性（已按用户 2026-10-02 指示从考虑项移除）**：原风险为 k3s 反隧道只保证 agent→server 的 apiserver 通道、跨节点 Pod 流量（flannel VXLAN 8472 UDP）与 kubelet 10250 需双向可达。新口径：管理机位于集群内部（内网），双向可达为既定前提，**不再验证、不降级**。本项仅保留技术备忘：若未来某工作机确实 NAT 后仅出网，原降级思路（同内网/隧道互通、flannel WireGuard、回退单机 k3s server 或 t5 容器方案）仍可参考。
 2. **k3s 未被 ModelSphere 官方走查（中）**：官方文档以 kubeadm 为准；k3s 全栈跑通无官方验证记录（待验证，PoC 第 1 步即验证项）。
 3. **cu129 on 535（沿用，中）**：理论可行未验证；建议 cu122 镜像或冒烟。
 4. **管理机 SPOF（中）**：控制面与管理组件都在管理机；建议快照/备份。
@@ -211,7 +211,7 @@ k3s agent（= kubelet + containerd + flannel + kube-proxy）
 
 ## 8. 待验证清单
 
-1. **管理机↔工作机双向网络可达性**（8472 UDP / 10250）——真机验证，决定本方案成立与否；
+1. ~~管理机↔工作机双向网络可达性（8472 UDP / 10250）~~ —— **已按用户 2026-10-02 指示移除**（管理机在内网，双向可达为既定前提）；
 2. ModelSphere 全栈在 **k3s**（v1.36）上完整跑通（含 gpu-operator toolkit `SET_AS_DEFAULT=true` 与引擎 POD 无 runtimeClassName 的适配）；
 3. 驱动 535.274.02 上 cu129 引擎镜像实际行为（或直接验证自建 cu122 镜像）；
 4. 工作机常驻资源实测（k3s agent / gpu-operator DaemonSets / 引擎 POD 实际 RSS 与 CPU）；
@@ -236,3 +236,45 @@ k3s agent（= kubelet + containerd + flannel + kube-proxy）
 - k3s + GPU 社区实践：https://blog.otvl.org/blog/k3s-gpu-node/（`k3s agent -s` + gpu-operator driver.enabled=false + k3s containerd 路径）
 - NVIDIA CUDA 兼容性（沿用 t5）：https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html
 - 前置报告：https://github.com/zcr268/cybercafe/blob/main/docs/modelsphere-feasibility.md
+
+---
+
+## 10. PoC 验证清单（新口径，2026-10-02 用户指示精简版）
+
+> 本节为**真机部署验证备用清单**（待队长通知真机恢复/新机器分配后执行）。
+> **口径调整（用户 2026-10-02）**：① 网络可达问题不再作为考虑项——管理机部署在集群内部（内网），管理机↔工作机双向可达是**既定前提**，不验证、不降级；② 验证聚焦单一目标：**在当前机器（或真机恢复/新机器）上能否完整部署 ModelSphere**（k3s 工作机 + gpu-operator + 引擎；管理面可在管理机或同环境）；③ 最终结论只需回答：**部署成功没有；若失败，阻塞在哪一步（阻塞点+原因）**。
+
+### 10.1 验证目标与判定标准
+
+| 项 | 内容 |
+|---|---|
+| 唯一目标 | ModelSphere（k3s 工作机 + gpu-operator + 引擎）在当前真机完整部署成功 |
+| 成功判定 | 引擎 POD Ready（2/2：engine+hang-watcher）+ `curl <openresty>/<route>/v1/chat/completions` 带 Key 返回正常 + `/v1/models` 可见 |
+| 失败判定 | 任一步阻塞时停止，**明确报告阻塞点（哪一步）与原因**（如：k3s join 失败/GPU 不可分配/镜像拉取失败/引擎 crash/OOM 等），不继续硬闯 |
+| 管理面位置 | 管理机（内网）或同环境；工作机只跑 k3s agent + gpu-operator + 引擎 |
+
+### 10.2 精简步骤（已去除网络可达相关项）
+
+1. **环境基线**：记录 A001-10-003 的 OS/内核/CPU/磁盘（31GB 内存、RTX 4080 SUPER 16GB、驱动 535.274.02/CUDA 12.2 已知）；确认 `nvidia-smi` 正常。
+2. **集群拆分**：管理机装 k3s server（v1.36.x，记录 token/IP）；工作机装 k3s agent join（`k3s agent -s https://<管理机IP>:6443 --token …`）；`kubectl get nodes` 双节点 Ready。
+3. **GPU 就绪**：gpu-operator（v26.3.3）预装驱动模式（节点标 `nvidia.com/gpu.deploy.driver=pre-installed`）；toolkit env 指 k3s containerd + `CONTAINERD_SET_AS_DEFAULT=true`；确认工作机 `nvidia.com/gpu` allocatable=1。
+4. **管理面组件**：ModelSphere helm-apply 最小集（`enabled: kubePrometheusStack: false, cilium: false, networkOperator: false, lws: false, volcano: false, rookCeph*: false`，保留 gpuOperator + openresty + autoconfig + llmOperator）；openresty 网关 + Bearer Key 文件。
+5. **权重预置**：工作机 `/mnt/disk0/models/<org>/<model>`（HF safetensors，modelCheck 校验 config.json/*.safetensors）。
+6. **引擎部署**：`helm install <model> modelsphere/sglang|vllm`（image 指向自建 cu122 镜像或先按默认 cu129 冒烟；nodeSelector 钉工作机；service NodePort）。
+7. **端到端冒烟**：cloudflared 隧道（或内网直连）→ `POST /<route>/v1/chat/completions`（Bearer Key）→ 成功；401/限流复验；记录引擎资源实测（RSS/VRAM/磁盘）。
+
+### 10.3 阻塞点报告格式（失败时按此回报）
+
+```
+部署结果：失败
+阻塞步骤：<第 N 步：名称>
+阻塞点  ：<现象/错误信息原文>
+原因判断：<根因分析，如 k3s join 端口/GPU 未 allocatable/镜像 digest 不兼容/OOM……>
+下一步  ：<建议修复项，如换 cu122 镜像、调整 toolkit env、加内存参数……>
+```
+
+### 10.4 仍保留的待验证项（PoC 中顺带记录，不阻塞主目标）
+
+- ModelSphere 全栈在 k3s 上完整跑通（含无 runtimeClassName 适配）；
+- cu129 vs 驱动 535.274.02 实际行为（失败则换自建 cu122）；
+- 工作机常驻资源与 16GB 显存模型量级实测；A001-10-003 OS/CPU/磁盘补录。
