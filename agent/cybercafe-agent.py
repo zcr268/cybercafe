@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 HEARTBEAT_INTERVAL = 10         # 心跳间隔（秒）
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -335,13 +335,13 @@ def step_tunnel():
 
 def step_verify(tunnel_url, api_key):
     last = ""
-    for _ in range(4):  # 隧道刚建立时边缘可能短暂 530，重试几次
-        rc, out = run('curl -s -m 60 -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" %s/v1/models'
-                      % (api_key, tunnel_url), timeout=90)
+    for i in range(8):  # 隧道边缘注册需要时间，000/5xx 均可重试，约2分钟窗口
+        rc, out = run('curl -s -m 45 -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" %s/v1/models'
+                      % (api_key, tunnel_url), timeout=60)
         last = out.strip()
         if last == "200":
             return "公网可达: " + tunnel_url
-        time.sleep(10)
+        time.sleep(15)
     raise DeployError("公网隧道验证失败: http " + last)
 
 def deploy(cmd, progress_cb):
