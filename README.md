@@ -89,6 +89,19 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 - `cybercafe-agent.py`：启动采集设备信息注册；每 10s 心跳上报状态并拉取指令；部署流水线逐节点上报进度；云端脚本版本变化时自动下载替换并重启（自更新）
 - 支持的指令：`deploy`（部署模型）、`stop`（停止容器）、`restart_tunnel`（重建隧道并上报新域名）
 
+## 脚本分发通道（raw / jsDelivr / 本地挂载，v0.3.3 云管理端加固）
+
+云管理端下发 `install.sh` / `cybercafe-agent.py` 走三通道（见 `cloud/src/index.js`「脚本/文件分发通道」）：
+
+1. **`AGENT_LOCAL_DIR`（首选，aliyun 生产用）**：直接读容器内挂载的仓库 `agent/` 目录——`git pull` 后**即时生效**，不受任何 CDN 缓存影响，零外部依赖；
+2. **`GITHUB_RAW_BASE`（主网络通道，默认 raw.githubusercontent.com）**：Fastly 边缘缓存 ≤5min，新版本最快分钟级生效；
+3. **jsDelivr（内置自动回退）**：aliyun 出口访问 raw 超时/任何环境主通道失败时自动兜底；`@main` 路径缓存 12h，时效最差，仅作韧性保障。
+
+要点：
+- **实测结论**：jsDelivr 与 raw.githubusercontent 都忽略 URL query 参与缓存键（已实测验证 `?t=` 破缓存无效），旧代码的 60s 窗口 query bust 已移除，改为「自适应双通道 + 5s 超时自动回退 + 本地挂载」。
+- **默认值即生产可用**：`DEFAULT_RAW_BASE` 未改变的部署环境即使漏注入 `GITHUB_RAW_BASE`，raw 不通时自动回退 jsDelivr，不会复现 aliyun 出口超时故障；aliyun 容器配置见 `deploy/aliyun/docker-compose.yml`（挂载 `../agent:/app/agent:ro` + `AGENT_LOCAL_DIR=/app/agent`）。
+- 新环境部署建议：CF Workers 用默认 raw 即可；容器类部署仿照 aliyun 挂载 `agent/` 并设置 `AGENT_LOCAL_DIR`。
+
 ## 注意
 
 - 目标机器需要 NVIDIA GPU + Ubuntu（脚本会自动安装 docker / nvidia-container-toolkit / 配置国内镜像加速）

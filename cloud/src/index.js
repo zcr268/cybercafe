@@ -4,7 +4,19 @@
 // - 安装脚本/控制脚本实时下发（从 GitHub 仓库 agent/ 拉取并注入参数）
 // - 静态管理 UI（assets）
 
+// 脚本/文件分发通道（2026-09-29 加固）：
+// - 主通道 raw.githubusercontent.com：Fastly 边缘 TTL 5min；实测 query 不参与缓存键，
+//   ?t= bust 对 raw 与 jsDelivr 均无效（已移除）
+// - 韧性回退 jsDelivr @main：实测 query 被忽略、按路径缓存 s-maxage=12h——仅作兜底；
+//   aliyun 出口访问 raw 超时时自动回退，即使漏注入 GITHUB_RAW_BASE 也不会复现生产超时故障
+// - aliyun 生产首选通道 AGENT_LOCAL_DIR（compose 挂载仓库 agent/ 目录）：
+//   零外部依赖，git pull 后即时生效，不受任何 CDN 缓存影响
 const DEFAULT_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent";
+const DEFAULT_JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/zcr268/cybercafe@main/agent";
+const FETCH_TIMEOUT_MS = 5000;
+const VERSION_CACHE_TTL_MS = 60000;
+// 网络通道自适应：isolate 内记住上次成功通道，避免 aliyun 每次先吃 raw 超时
+let lastNetworkOk = null; // "raw" | "jsdelivr"
 
 // 引擎 × 模型 目录：UI 引擎下拉 + 模型级联下拉的源数据；部署指令携带 engine 字段
 // - ollama 走 Ollama 仓库 tag；vllm/sglang 走 HuggingFace 模型 id（HF_ENDPOINT=hf-mirror 拉权重）
@@ -47,13 +59,45 @@ function rawBase(env) {
   return (env.GITHUB_RAW_BASE || DEFAULT_RAW_BASE).replace(/\/$/, "");
 }
 
+function jsdelivrBase(env) {
+  return (env.JSDELIVR_RAW_BASE || DEFAULT_JSDELIVR_BASE).replace(/\/$/, "");
+}
+
+async function readLocalRepoFile(env, name) {
+  // 仅 wrangler dev / Node 环境可用；真实 CF Worker 无 node:fs，import 抛错 → 上层回退网络通道。
+  // 用变量形式写 specifier，避免 esbuild 在 CF 构建期静态解析 node:fs
+  const specifier = "node:fs/promises";
+  const { readFile } = await import(specifier);
+  return await readFile(`${env.AGENT_LOCAL_DIR}/${name}`, "utf8");
+}
+
 async function fetchRepoFile(env, name) {
-  // raw.githubusercontent.com CDN 缓存较久：按 60s 窗口加查询参数破缓存，
-  // 保证「从仓库实时拉取」语义，同时避免每次心跳都打到 GitHub 源站。
-  const bust = Math.floor(Date.now() / 60000);
-  const resp = await fetch(`${rawBase(env)}/${name}?t=${bust}`, { cf: { cacheTtl: 30 } });
-  if (!resp.ok) throw new Error(`fetch repo file ${name} failed: ${resp.status}`);
-  return await resp.text();
+  // 通道 0：AGENT_LOCAL_DIR（aliyun 生产挂载仓库 agent/，即时生效、零外部依赖）
+  if (env.AGENT_LOCAL_DIR) {
+    try { return await readLocalRepoFile(env, name); }
+    catch (e) { /* 挂载缺失/不可读 → 网络通道兜底 */ }
+  }
+  // 通道 1/2：raw 主 + jsDelivr 回退（自适应顺序，各 5s 超时）
+  const raw = `${rawBase(env)}/${name}`;
+  const jsd = `${jsdelivrBase(env)}/${name}`;
+  const firstUrl = lastNetworkOk === "jsdelivr" ? jsd : raw;
+  const secondUrl = firstUrl === jsd ? raw : jsd;
+  const label = firstUrl === jsd ? "jsdelivr" : "raw";
+  try {
+    const resp = await fetch(firstUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    lastNetworkOk = label;
+    return await resp.text();
+  } catch (e1) {
+    try {
+      const resp = await fetch(secondUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      lastNetworkOk = secondUrl === jsd ? "jsdelivr" : "raw";
+      return await resp.text();
+    } catch (e2) {
+      throw new Error(`fetch ${name} failed (${label}: ${e1.message}; fallback: ${e2.message})`);
+    }
+  }
 }
 
 // 经 cloudflared 等反代时 url.protocol 是 http，用 X-Forwarded-Proto 还原真实协议
@@ -62,10 +106,17 @@ function publicOrigin(request, url) {
   return `${proto}://${url.host}`;
 }
 
+let versionCache = null; // { v, at }
+
 async function agentVersion(env) {
+  // 60s 内存缓存：心跳不必每次外拉脚本源，降低外部依赖面；新版本最迟 60s 内生效
+  const now = Date.now();
+  if (versionCache && now - versionCache.at < VERSION_CACHE_TTL_MS) return versionCache.v;
   const src = await fetchRepoFile(env, "cybercafe-agent.py");
   const m = src.match(/^VERSION\s*=\s*"([^"]+)"/m);
-  return m ? m[1] : "0.0.0";
+  const v = m ? m[1] : "0.0.0";
+  versionCache = { v, at: now };
+  return v;
 }
 
 function injectParams(src, apiBase, deviceKey) {
@@ -77,10 +128,10 @@ function injectParams(src, apiBase, deviceKey) {
 async function deviceFromKey(request, env) {
   const key = request.headers.get("X-Device-Key") || "";
   if (!key) return null;
-  const id = (await sha256hex(key)).slice(0, 12);
-  const rec = await env.CYBERCAFE_KV.get(`devicekey:${await sha256hex(key)}`);
+  const h = await sha256hex(key);
+  const rec = await env.CYBERCAFE_KV.get(`devicekey:${h}`);
   if (!rec) return null;
-  return { id, key };
+  return { id: h.slice(0, 12), key, keyHash: h };
 }
 
 function adminOk(request, env) {
@@ -102,6 +153,7 @@ async function handleRegister(request, env, dev) {
     ...old,
     ...info,
     device_id: dev.id,
+    key_hash: dev.keyHash,
     first_seen: old.first_seen || now,
     last_seen: now,
     deploy: old.deploy || { state: "idle" },
@@ -118,6 +170,14 @@ async function handleHeartbeat(request, env, dev) {
   const old = (await env.CYBERCAFE_KV.get(key, "json")) || {};
   const rec = { ...old, ...upd, device_id: dev.id, last_seen: now };
   delete rec.command;
+  // deploy 深度合并：agent 部分上报（如 restart_tunnel 仅带 state/tunnel_url）时保留已有
+  // engine/model/model_api_key，避免重建隧道后聊天失去鉴权 Key；
+  // stop 语义为整体清空运行态 → 直接替换（丢弃过期 tunnel_url/engine 等）
+  if (upd.deploy && typeof upd.deploy === "object") {
+    rec.deploy = upd.deploy.state === "stopped"
+      ? { ...upd.deploy, ts: upd.deploy.ts || now }
+      : { ...(old.deploy || {}), ...upd.deploy, ts: upd.deploy.ts || now };
+  }
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
 
   // 取出待执行指令（一次性）
@@ -140,9 +200,14 @@ async function handleProgress(request, env, dev) {
   const key = `device:${dev.id}`;
   const rec = (await env.CYBERCAFE_KV.get(key, "json")) || { device_id: dev.id };
   rec.last_seen = now;
+  const prevState = (rec.deploy && rec.deploy.state) || "idle";
+  let state = body.state === "fail" ? "failed"
+    : (body.step === "verify" && body.state === "ok" ? "online" : "deploying");
+  // 迟到的旧进度不推翻已 online 的结论（新一轮部署会先经 admin/deploy 重置为 queued）
+  if (prevState === "online" && state === "deploying") state = "online";
   rec.deploy = {
     ...(rec.deploy || {}),
-    state: body.state === "fail" ? "failed" : (body.step === "verify" && body.state === "ok" ? "online" : "deploying"),
+    state,
     step: body.step,
     step_state: body.state,
     detail: body.detail || "",
@@ -185,13 +250,16 @@ async function handleDeviceProvision(request, env, url) {
   const info = (body.device && typeof body.device === "object") ? body.device : {};
   let key;
   let reused = !!(mapped && mapped.batch === code);
+  let keyHash = null;
   if (reused) {
     key = mapped.key;
+    keyHash = await sha256hex(key);
   } else {
     if (batch.expires && now > batch.expires) return json({ error: `batch ${code} expired` }, 403);
     if ((batch.used || 0) >= batch.quota) return json({ error: `batch ${code} quota full` }, 403);
     key = randKey("cck-");
-    await env.CYBERCAFE_KV.put(`devicekey:${await sha256hex(key)}`,
+    keyHash = await sha256hex(key);
+    await env.CYBERCAFE_KV.put(`devicekey:${keyHash}`,
       JSON.stringify({ label: String(info.hostname || "").slice(0, 120), batch: code,
                        machine_id: machineId, created_at: now }));
     await env.CYBERCAFE_KV.put(mapKey, JSON.stringify({ key, batch: code, created_at: now }));
@@ -207,6 +275,7 @@ async function handleDeviceProvision(request, env, url) {
   await env.CYBERCAFE_KV.put(devKey, JSON.stringify({
     ...old,
     device_id: id,
+    key_hash: keyHash,
     machine_id: machineId,
     batch: code,
     hostname: String(info.hostname || old.hostname || "").slice(0, 120),
@@ -221,12 +290,24 @@ async function handleDeviceProvision(request, env, url) {
 
 // ---------- 管理侧 API ----------
 
+async function kvListAll(kv, prefix) {
+  // KV list 单页最多 1000 键，遍历 cursor 取全量，避免设备/批次超千台被截断
+  const out = [];
+  let cursor;
+  do {
+    const page = await kv.list({ prefix, cursor });
+    out.push(...page.keys);
+    cursor = page.cursor;
+  } while (cursor);
+  return out;
+}
+
 async function handleAdminDevices(env) {
-  const list = await env.CYBERCAFE_KV.list({ prefix: "device:" });
+  const keys = await kvListAll(env.CYBERCAFE_KV, "device:");
   const now = Math.floor(Date.now() / 1000);
+  const recs = await Promise.all(keys.map(k => env.CYBERCAFE_KV.get(k.name, "json")));
   const devices = [];
-  for (const k of list.keys) {
-    const rec = await env.CYBERCAFE_KV.get(k.name, "json");
+  for (const rec of recs) {
     if (!rec) continue;
     rec.online = now - (rec.last_seen || 0) < 35;
     devices.push(rec);
@@ -265,11 +346,11 @@ async function handleAdminCreateBatch(request, env) {
 }
 
 async function handleAdminListBatches(env) {
-  const list = await env.CYBERCAFE_KV.list({ prefix: "batch:" });
+  const keys = await kvListAll(env.CYBERCAFE_KV, "batch:");
   const now = Math.floor(Date.now() / 1000);
+  const recs = await Promise.all(keys.map(k => env.CYBERCAFE_KV.get(k.name, "json")));
   const batches = [];
-  for (const k of list.keys) {
-    const rec = await env.CYBERCAFE_KV.get(k.name, "json");
+  for (const rec of recs) {
     if (!rec) continue;
     rec.remaining = Math.max(0, (rec.quota || 0) - (rec.used || 0));
     rec.expired = !!(rec.expires && now > rec.expires);
@@ -309,7 +390,8 @@ async function handleAdminDeploy(request, env) {
   // 清理旧日志，标记排队中
   await env.CYBERCAFE_KV.delete(`log:${body.device_id}`);
   const key = `device:${body.device_id}`;
-  const rec = (await env.CYBERCAFE_KV.get(key, "json")) || { device_id: body.device_id };
+  const rec = await env.CYBERCAFE_KV.get(key, "json");
+  if (!rec) return json({ error: "device not found" }, 404);
   rec.deploy = { state: "queued", engine, model, ts: Math.floor(Date.now() / 1000) };
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
   return json({ ok: true, command: { ...cmd, api_key: undefined } });
@@ -319,6 +401,8 @@ async function handleAdminCommand(request, env) {
   const body = await request.json().catch(() => ({}));
   if (!body.device_id || !["stop", "restart_tunnel"].includes(body.type))
     return json({ error: "device_id + type(stop|restart_tunnel) required" }, 400);
+  const exists = await env.CYBERCAFE_KV.get(`device:${body.device_id}`, "json");
+  if (!exists) return json({ error: "device not found" }, 404);
   await env.CYBERCAFE_KV.put(`cmd:${body.device_id}`,
     JSON.stringify({ type: body.type, created_at: Math.floor(Date.now() / 1000) }));
   return json({ ok: true });
@@ -338,6 +422,11 @@ async function handleAdminDeleteDevice(env, id) {
   await env.CYBERCAFE_KV.delete(`device:${id}`);
   await env.CYBERCAFE_KV.delete(`cmd:${id}`);
   await env.CYBERCAFE_KV.delete(`log:${id}`);
+  if (rec) {
+    // 连带吊销设备密钥（防止删除后旧 key 重新注册复活设备）与批次 machine 映射
+    if (rec.key_hash) await env.CYBERCAFE_KV.delete(`devicekey:${rec.key_hash}`);
+    if (rec.machine_id) await env.CYBERCAFE_KV.delete(`prov:machine:${rec.machine_id}`);
+  }
   return json({ ok: true, removed: !!rec });
 }
 

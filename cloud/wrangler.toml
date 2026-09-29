@@ -14,5 +14,8 @@ id = "__KV_NAMESPACE_ID__"
 
 # 非敏感配置；ADMIN_TOKEN 请用 secret 设置：
 #   wrangler secret put ADMIN_TOKEN
+# GITHUB_RAW_BASE：脚本分发主通道（默认 raw.githubusercontent；aliyun 容器按需注入 jsDelivr）。
+# 代码内置 jsDelivr 自动回退 + 可选 AGENT_LOCAL_DIR（本地目录通道，aliyun 挂载仓库 agent/），
+# 详见 src/index.js 顶部「脚本/文件分发通道」说明。
 [vars]
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent"

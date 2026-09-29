@@ -223,7 +223,7 @@ function renderDevices() {
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
       <td><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}<br>
           <span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
-          ${dep.tunnel_url ? `<br><a class="mono" href="${dep.tunnel_url}" target="_blank">${dep.tunnel_url}</a>` : ""}</td>
+          ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}</td>
       <td><div class="row">
         <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
         <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
@@ -238,7 +238,7 @@ function renderDevices() {
 }
 
 function renderChatDevs() {
-  const online = devices.filter(d => d.deploy && d.deploy.tunnel_url);
+  const online = devices.filter(d => d.deploy && safeUrl(d.deploy.tunnel_url));
   const sel = $("chatDev");
   const cur = sel.value;
   sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.engine||"")} · ${esc(d.deploy.model||"")}）</option>`).join("");
@@ -269,8 +269,11 @@ window.cmd = async (id, type) => {
 };
 window.delDev = async id => {
   if (!confirm("删除设备 " + id + " 的记录？（不会卸载机器上的脚本）")) return;
-  try { await api("/api/admin/device/" + id, { method: "DELETE" }); refresh(); }
-  catch (e) { toast(e.message, false); }
+  try {
+    await api("/api/admin/device/" + id, { method: "DELETE" });
+    if (logDevice === id) { clearInterval(logTimer); logTimer = null; logDevice = null; $("logWho").textContent = ""; $("logbox").textContent = "（点击设备行的「日志」查看）"; }
+    refresh();
+  } catch (e) { toast(e.message, false); }
 };
 window.viewLog = id => {
   logDevice = id; $("logWho").textContent = "· " + id;
@@ -319,6 +322,14 @@ function deployPct(dep) {
 
 // ---------- 聊天 ----------
 function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+// 隧道地址来自设备上报（不可信）：仅放行 http/https 绝对 URL，防 javascript:/data: 注入
+function safeUrl(u) {
+  if (!u) return "";
+  try {
+    const p = new URL(String(u), window.location.origin);
+    return (p.protocol === "https:" || p.protocol === "http:") ? String(u) : "";
+  } catch { return ""; }
+}
 function addMsg(role, text) {
   const d = document.createElement("div");
   d.className = "msg " + (role === "user" ? "user" : "bot");
@@ -332,16 +343,20 @@ async function send() {
   const d = devices.find(x => x.device_id === id);
   const text = $("chatIn").value.trim();
   if (!text) return;
-  if (!d || !d.deploy || !d.deploy.tunnel_url) { toast("该设备没有可用隧道地址", false); return; }
+  const turl = safeUrl(d && d.deploy && d.deploy.tunnel_url);
+  if (!turl) { toast("该设备没有可用隧道地址", false); return; }
   $("chatIn").value = "";
   addMsg("user", text);
   const thinking = addMsg("bot", "…");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000); // 长生成超时保护（首次推理可能较慢）
   try {
-    const r = await fetch(d.deploy.tunnel_url + "/v1/chat/completions", {
+    const r = await fetch(turl + "/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json",
-                 "Authorization": "Bearer " + d.deploy.model_api_key },
+                 "Authorization": "Bearer " + (d.deploy.model_api_key || "") },
       body: JSON.stringify({ model: d.deploy.model, messages: [{ role: "user", content: text }] }),
+      signal: ctrl.signal,
     });
     const raw = await r.text();
     let j = {};
@@ -351,7 +366,9 @@ async function send() {
     if (!j.choices || !j.choices[0]) throw new Error("HTTP " + r.status + " 响应格式异常: " + raw.slice(0, 200));
     thinking.textContent = j.choices[0].message.content;
   } catch (e) {
-    thinking.textContent = "❌ " + e.message;
+    thinking.textContent = "❌ " + (e.name === "AbortError" ? "请求超时（120s），请确认设备在线且隧道存活" : e.message);
+  } finally {
+    clearTimeout(timer);
   }
 }
 $("btnSend").onclick = send;
