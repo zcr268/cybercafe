@@ -14,8 +14,11 @@ if [ "$(id -u)" != "0" ]; then
     echo "[cybercafe] ERROR: 需要 root 运行" >&2
     exit 1
 fi
-if [ "$DEVICE_KEY" = "__DEVICE_KEY__" ] || [ -z "$DEVICE_KEY" ]; then
-    echo "[cybercafe] ERROR: 未注入设备 KEY，请从云管理端复制完整安装命令" >&2
+# 注意：占位符拆分拼接，避免云端注入时把校验逻辑本身也替换掉
+PH_KEY="__DEVICE_""KEY__"
+PH_API="__API_""BASE__"
+if [ -z "$DEVICE_KEY" ] || [ "$DEVICE_KEY" = "$PH_KEY" ] || [ "$API_BASE" = "$PH_API" ]; then
+    echo "[cybercafe] ERROR: 参数未注入，请从云管理端复制完整安装命令" >&2
     exit 1
 fi
 
