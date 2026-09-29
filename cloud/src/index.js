@@ -111,7 +111,11 @@ async function handleHeartbeat(request, env, dev) {
 
   let ver = "0.0.0";
   try { ver = await agentVersion(env); } catch (e) { /* 仓库不可达时跳过自更新 */ }
-  return json({ ok: true, server_time: now, agent_version: ver, command: cmd || null });
+
+  // 变速心跳：有待执行指令或部署进行中 → 3s 快轮询；否则 10s
+  const st = (rec.deploy && rec.deploy.state) || "idle";
+  const pollAfter = (cmd || st === "queued" || st === "deploying") ? 3 : 10;
+  return json({ ok: true, server_time: now, agent_version: ver, command: cmd || null, poll_after: pollAfter });
 }
 
 async function handleProgress(request, env, dev) {

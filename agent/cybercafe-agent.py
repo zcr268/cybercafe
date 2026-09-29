@@ -11,10 +11,11 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.1.4"
+VERSION = "0.2.0"
 
-HEARTBEAT_INTERVAL = 10         # 心跳间隔（秒）
+HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
+POLL_MIN, POLL_MAX = 3, 300     # poll_after 钳制范围
 RAW_UA = "cybercafe-agent/%s" % VERSION
 
 import hashlib
@@ -127,6 +128,54 @@ def collect_device_info():
         info["ips"] = [l.strip() for l in out.strip().splitlines() if l.strip()]
     return info
 
+# ---------------------------------------------------------------- 资源用量采集
+
+def _cpu_times():
+    with open("/proc/stat") as f:
+        parts = f.readline().split()[1:]
+    vals = [int(x) for x in parts]
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)  # idle + iowait
+    return idle, sum(vals)
+
+def collect_usage():
+    """采集 CPU/内存/GPU 用量。CPU 采样 0.2s 差值。"""
+    u = {}
+    try:
+        i1, t1 = _cpu_times()
+        time.sleep(0.2)
+        i2, t2 = _cpu_times()
+        dt, di = t2 - t1, i2 - i1
+        if dt > 0:
+            u["cpu_pct"] = round(100.0 * (1 - di / dt), 1)
+    except Exception:
+        pass
+    try:
+        mt = ma = 0
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mt = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    ma = int(line.split()[1])
+        if mt:
+            u["mem_pct"] = round(100.0 * (1 - ma / mt), 1)
+            u["mem_used_gb"] = round((mt - ma) / 1048576, 1)
+            u["mem_total_gb"] = round(mt / 1048576, 1)
+    except Exception:
+        pass
+    rc, out = run("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total "
+                  "--format=csv,noheader,nounits 2>/dev/null | head -1", timeout=15)
+    if rc == 0 and out.strip():
+        try:
+            gu, mu, mtot = [int(x.strip()) for x in out.strip().split(",")[:3]]
+            u["gpu_util_pct"] = gu
+            u["gpu_mem_used_mb"] = mu
+            u["gpu_mem_total_mb"] = mtot
+            u["gpu_mem_pct"] = round(100.0 * mu / mtot, 1) if mtot else 0
+        except ValueError:
+            pass
+    return u
+
 # ---------------------------------------------------------------- 云端交互
 
 def register():
@@ -139,7 +188,7 @@ def register():
 
 def heartbeat(extra=None):
     payload = {"device": {"device_id": device_id(), "agent_version": VERSION,
-                          "last_seen": int(time.time())}}
+                          "last_seen": int(time.time()), "usage": collect_usage()}}
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -453,18 +502,23 @@ def main():
         if register():
             break
         time.sleep(10)
+    poll = HEARTBEAT_INTERVAL
     while True:
         try:
             js = heartbeat()
             if js:
                 self_update(js.get("agent_version"))
+                pa = js.get("poll_after")
+                if isinstance(pa, (int, float)):
+                    poll = max(POLL_MIN, min(POLL_MAX, int(pa)))
                 cmd = js.get("command")
                 if cmd:
                     handle_command(cmd)
+                    poll = POLL_MIN  # 执行完指令后快速回到云端取结果/新指令
         except Exception as e:
             log("主循环异常: %s" % e)
             traceback.print_exc()
-        time.sleep(HEARTBEAT_INTERVAL)
+        time.sleep(poll)
 
 if __name__ == "__main__":
     main()
