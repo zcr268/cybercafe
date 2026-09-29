@@ -56,6 +56,7 @@
 <header>
   <h1>☁️ CyberCafe 云管理</h1>
   <span class="spacer"></span>
+  <button class="gray sm" id="btnBatch">批次安装码</button>
   <button class="gray sm" id="btnAddDev">+ 添加设备</button>
   <button class="gray sm" id="btnLogout">退出</button>
 </header>
@@ -79,6 +80,19 @@
     </table>
     <h2 style="margin-top:18px">部署进度日志 <span id="logWho" class="mono" style="color:#64748b"></span></h2>
     <div id="logbox">（点击设备行的「日志」查看）</div>
+  </div>
+
+  <div class="card">
+    <h2>批次安装码（基础镜像批量装机）</h2>
+    <div class="row" style="margin-bottom:8px">
+      <button id="btnBatch">生成批次码</button>
+      <span style="font-size:12px;color:#64748b">镜像预置批次码后，实例首启自动注册设备（免逐台执行安装命令）</span>
+    </div>
+    <table>
+      <thead><tr><th>批次码</th><th>备注</th><th>用量</th><th>有效期</th><th>创建</th></tr></thead>
+      <tbody id="batchRows"></tbody>
+    </table>
+    <div id="batchHint" style="margin-top:8px;font-size:12px;color:#64748b"></div>
   </div>
 
   <div class="card">
@@ -137,6 +151,46 @@ $("btnAddDev").onclick = async () => {
   } catch (e) { toast(e.message, false); }
 };
 
+$("btnBatch").onclick = async () => {
+  const quotaIn = prompt("批次配额（允许注册的设备台数）:", "10");
+  if (quotaIn === null) return;
+  const quota = parseInt(quotaIn, 10);
+  if (!(quota >= 1)) { toast("配额需为 >=1 的整数", false); return; }
+  const label = prompt("批次备注（可空，如：门店A-20260929）:") || "";
+  const daysIn = prompt("有效期（天，可空=永不过期）:", "");
+  const body = { quota, label };
+  if (daysIn && !isNaN(parseInt(daysIn, 10)) && parseInt(daysIn, 10) > 0)
+    body.expires = Math.floor(Date.now()/1000) + parseInt(daysIn, 10) * 86400;
+  try {
+    const j = await api("/api/admin/batches", { method: "POST", body: JSON.stringify(body) });
+    toast("批次码已生成: " + j.code);
+    $("batchHint").innerHTML = `新批次 <b class="mono">${esc(j.code)}</b>（配额 ${j.quota}${j.expires ? "，有效期至 " + new Date(j.expires*1000).toLocaleString() : ""}）已生成。<br>
+      镜像预置 ① 写批次码 <span class="mono">echo ${esc(j.code)} > /etc/cybercafe/batch.code</span>；
+      ② 预置 <span class="mono">agent/provision.sh</span> + <span class="mono">cybercafe-provision.service</span>（systemd oneshot）。
+      实例首次开机自动向 /api/device/provision 注册并领取 cck- 设备密钥，无需逐台执行安装命令。`;
+    loadBatches();
+  } catch (e) { toast(e.message, false); }
+};
+
+async function loadBatches() {
+  try {
+    const j = await api("/api/admin/batches");
+    $("batchRows").innerHTML = j.batches.map(b => {
+      const full = (b.used || 0) >= (b.quota || 0);
+      const expired = b.expired;
+      const st = expired ? "已过期" : full ? "已满" : "可用";
+      const cls = (expired || full) ? "failed" : "online";
+      return `<tr>
+        <td><span class="mono">${esc(b.code)}</span></td>
+        <td>${esc(b.label||"-")}</td>
+        <td>${b.used}/${b.quota} <span class="state ${cls}">${st}</span></td>
+        <td>${b.expires ? new Date(b.expires*1000).toLocaleString() : "永久"}</td>
+        <td style="color:#64748b">${new Date((b.created||0)*1000).toLocaleString()}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5" style="color:#64748b">暂无批次。点「生成批次码」创建。</td></tr>`;
+  } catch (e) { /* 401 由 api() 统一处理 */ }
+}
+
 function ago(ts) {
   if (!ts) return "-";
   const s = Math.floor(Date.now()/1000) - ts;
@@ -149,7 +203,7 @@ async function refresh() {
   try {
     const j = await api("/api/admin/devices");
     devices = j.devices; engines = j.engines || {};
-    renderDevices(); renderChatDevs();
+    renderDevices(); renderChatDevs(); loadBatches();
   } catch (e) { /* token 失效会自行跳登录 */ }
 }
 
@@ -163,7 +217,8 @@ function renderDevices() {
     const depBar = (dep.state && !["idle","stopped"].includes(dep.state))
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
     return `<tr>
-      <td><span class="dot ${d.online ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b><br>
+      <td><span class="dot ${d.online ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
+          ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span></td>
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
       <td><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}<br>

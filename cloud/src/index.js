@@ -36,6 +36,13 @@ function randKey(prefix) {
   return prefix + [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+function randCode(prefix) {
+  // 批次码：短随机（6字节=12 hex）便于镜像预置/命令行使用
+  const a = new Uint8Array(6);
+  crypto.getRandomValues(a);
+  return prefix + [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 function rawBase(env) {
   return (env.GITHUB_RAW_BASE || DEFAULT_RAW_BASE).replace(/\/$/, "");
 }
@@ -151,6 +158,67 @@ async function handleProgress(request, env, dev) {
   return json({ ok: true });
 }
 
+// ---------- 批次码（基础镜像批量装机）----------
+// /api/device/provision 无 X-Device-Key 鉴权：批次码本身即装机凭证（镜像预置，首启自动注册）。
+// KV key 约定：
+//   batch:<code>            = {code, label, quota, used, created, expires}
+//   prov:machine:<machine>  = {key, batch, created_at}   machine_id → 设备 key（重复装机复用）
+//   devicekey:<hash>        = 沿用现有，新增 batch/machine_id 字段
+
+async function handleDeviceProvision(request, env, url) {
+  const body = await request.json().catch(() => ({}));
+  const code = String(body.batch_code || "").trim();
+  const machineId = String(body.machine_id || "").trim();
+  if (!code) return json({ error: "batch_code required" }, 400);
+  if (!machineId) return json({ error: "machine_id required" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+
+  const batchKey = `batch:${code}`;
+  const batch = await env.CYBERCAFE_KV.get(batchKey, "json");
+  if (!batch) return json({ error: `batch ${code} not found` }, 403);
+
+  // 同一 machine_id 已在本批次注册过 → 复用原设备 key，不消耗配额、不受过期/配额限制；
+  // 仅限同批次复用，避免跨批次领取他人设备 key（machine_id 非机密）。
+  const mapKey = `prov:machine:${machineId}`;
+  const mapped = await env.CYBERCAFE_KV.get(mapKey, "json");
+  // provision 入参的硬件信息（hostname/os），用于预置设备记录；复用路径不强制要求
+  const info = (body.device && typeof body.device === "object") ? body.device : {};
+  let key;
+  let reused = !!(mapped && mapped.batch === code);
+  if (reused) {
+    key = mapped.key;
+  } else {
+    if (batch.expires && now > batch.expires) return json({ error: `batch ${code} expired` }, 403);
+    if ((batch.used || 0) >= batch.quota) return json({ error: `batch ${code} quota full` }, 403);
+    key = randKey("cck-");
+    await env.CYBERCAFE_KV.put(`devicekey:${await sha256hex(key)}`,
+      JSON.stringify({ label: String(info.hostname || "").slice(0, 120), batch: code,
+                       machine_id: machineId, created_at: now }));
+    await env.CYBERCAFE_KV.put(mapKey, JSON.stringify({ key, batch: code, created_at: now }));
+    // 配额计数（KV 无原子自增；provision 为一次性首启行为，读改写可接受）
+    batch.used = (batch.used || 0) + 1;
+    await env.CYBERCAFE_KV.put(batchKey, JSON.stringify(batch));
+  }
+
+  // 设备记录预置 batch 来源字段（agent 首次注册/心跳 merge 时保留）
+  const id = (await sha256hex(key)).slice(0, 12);
+  const devKey = `device:${id}`;
+  const old = (await env.CYBERCAFE_KV.get(devKey, "json")) || {};
+  await env.CYBERCAFE_KV.put(devKey, JSON.stringify({
+    ...old,
+    device_id: id,
+    machine_id: machineId,
+    batch: code,
+    hostname: String(info.hostname || old.hostname || "").slice(0, 120),
+    os: String(info.os || old.os || "").slice(0, 120),
+    first_seen: old.first_seen || now,
+    provisioned_at: now,
+  }));
+
+  return json({ ok: true, device_key: key, device_id: id, batch: code, reused,
+                api_base: publicOrigin(request, url) });
+}
+
 // ---------- 管理侧 API ----------
 
 async function handleAdminDevices(env) {
@@ -165,6 +233,50 @@ async function handleAdminDevices(env) {
   }
   devices.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
   return json({ ok: true, devices, models: MODELS, engines: ENGINES });
+}
+
+async function handleAdminCreateBatch(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const quota = parseInt(body.quota, 10);
+  if (!Number.isInteger(quota) || quota < 1) return json({ error: "quota 需为 >=1 的整数" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  let expires = body.expires;
+  if (typeof expires === "string" && expires) {
+    const t = Date.parse(expires);
+    if (isNaN(t)) return json({ error: "expires 需为 ISO 时间或秒级时间戳" }, 400);
+    expires = Math.floor(t / 1000);
+  }
+  if (expires === undefined || expires === null || expires === "") {
+    expires = null;
+  } else if (typeof expires !== "number" || !isFinite(expires) || expires <= now) {
+    return json({ error: "expires 需为未来的秒级时间戳或 ISO 时间" }, 400);
+  }
+  const code = randCode("ccb-");
+  const rec = {
+    code,
+    label: String(body.label || "").slice(0, 200),
+    quota,
+    used: 0,
+    created: now,
+    expires,
+  };
+  await env.CYBERCAFE_KV.put(`batch:${code}`, JSON.stringify(rec));
+  return json({ ok: true, ...rec });
+}
+
+async function handleAdminListBatches(env) {
+  const list = await env.CYBERCAFE_KV.list({ prefix: "batch:" });
+  const now = Math.floor(Date.now() / 1000);
+  const batches = [];
+  for (const k of list.keys) {
+    const rec = await env.CYBERCAFE_KV.get(k.name, "json");
+    if (!rec) continue;
+    rec.remaining = Math.max(0, (rec.quota || 0) - (rec.used || 0));
+    rec.expired = !!(rec.expires && now > rec.expires);
+    batches.push(rec);
+  }
+  batches.sort((a, b) => (b.created || 0) - (a.created || 0));
+  return json({ ok: true, batches });
 }
 
 async function handleAdminNewDevice(request, env, origin) {
@@ -276,6 +388,9 @@ export default {
         return await handleInstallSh(request, env, url);
 
       // 设备侧
+      // provision：无 X-Device-Key 鉴权——批次码即装机凭证（基础镜像首启自动注册）
+      if (path === "/api/device/provision" && request.method === "POST")
+        return await handleDeviceProvision(request, env, url);
       if (path === "/api/agent/latest" && request.method === "GET") {
         const dev = await deviceFromKey(request, env);
         if (!dev) return json({ error: "invalid device key" }, 401);
@@ -311,6 +426,10 @@ export default {
           return await handleAdminDeploy(request, env);
         if (path === "/api/admin/command" && request.method === "POST")
           return await handleAdminCommand(request, env);
+        if (path === "/api/admin/batches" && request.method === "POST")
+          return await handleAdminCreateBatch(request, env);
+        if (path === "/api/admin/batches" && request.method === "GET")
+          return await handleAdminListBatches(env);
         const m = path.match(/^\/api\/admin\/device\/([0-9a-f]{12})$/);
         if (m && request.method === "GET") return await handleAdminDeviceDetail(env, m[1]);
         if (m && request.method === "DELETE") return await handleAdminDeleteDevice(env, m[1]);

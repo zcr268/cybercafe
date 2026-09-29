@@ -1,0 +1,14 @@
+# 基础镜像首启 provision 单元（与 provision.sh 内置单元保持一致，镜像预置两者之一即可）
+[Unit]
+Description=CyberCafe First Boot Provisioning
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/opt/cybercafe/.provisioned
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/cybercafe/provision.sh
+
+[Install]
+WantedBy=multi-user.target

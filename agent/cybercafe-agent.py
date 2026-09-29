@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -83,6 +83,7 @@ def device_id():
 def collect_device_info():
     info = {
         "device_id": device_id(),
+        "machine_id": "",
         "hostname": platform.node(),
         "os": "",
         "kernel": platform.release(),
@@ -95,6 +96,17 @@ def collect_device_info():
         "ips": [],
         "agent_version": VERSION,
     }
+    # machine_id：与基础镜像 provision（provision.sh 采集 /etc/machine-id）一致，
+    # 云端据此关联设备记录与批次来源
+    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            with open(p) as f:
+                v = f.read().strip()
+                if v:
+                    info["machine_id"] = v
+                    break
+        except Exception:
+            pass
     try:
         with open("/etc/os-release") as f:
             for line in f:
