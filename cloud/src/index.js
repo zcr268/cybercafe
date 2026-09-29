@@ -32,9 +32,18 @@ function rawBase(env) {
 }
 
 async function fetchRepoFile(env, name) {
-  const resp = await fetch(`${rawBase(env)}/${name}`, { cf: { cacheTtl: 30 } });
+  // raw.githubusercontent.com CDN 缓存较久：按 60s 窗口加查询参数破缓存，
+  // 保证「从仓库实时拉取」语义，同时避免每次心跳都打到 GitHub 源站。
+  const bust = Math.floor(Date.now() / 60000);
+  const resp = await fetch(`${rawBase(env)}/${name}?t=${bust}`, { cf: { cacheTtl: 30 } });
   if (!resp.ok) throw new Error(`fetch repo file ${name} failed: ${resp.status}`);
   return await resp.text();
+}
+
+// 经 cloudflared 等反代时 url.protocol 是 http，用 X-Forwarded-Proto 还原真实协议
+function publicOrigin(request, url) {
+  const proto = request.headers.get("X-Forwarded-Proto") || url.protocol.replace(":", "");
+  return `${proto}://${url.host}`;
 }
 
 async function agentVersion(env) {
@@ -212,7 +221,7 @@ async function handleInstallSh(request, env, url) {
   if (!rec) return new Response("invalid device key\n", { status: 403 });
   try {
     const src = await fetchRepoFile(env, "install.sh");
-    const body = injectParams(src, url.origin, key);
+    const body = injectParams(src, publicOrigin(request, url), key);
     return new Response(body, { headers: { "Content-Type": "text/x-shellscript; charset=utf-8" } });
   } catch (e) {
     return new Response(`fetch install.sh failed: ${e.message}\n`, { status: 502 });
@@ -222,7 +231,7 @@ async function handleInstallSh(request, env, url) {
 async function handleAgentLatest(request, env, dev, url) {
   try {
     const src = await fetchRepoFile(env, "cybercafe-agent.py");
-    const body = injectParams(src, url.origin, dev.key);
+    const body = injectParams(src, publicOrigin(request, url), dev.key);
     return new Response(body, { headers: { "Content-Type": "text/x-python; charset=utf-8" } });
   } catch (e) {
     return new Response(`fetch agent failed: ${e.message}\n`, { status: 502 });
@@ -280,7 +289,7 @@ export default {
         if (path === "/api/admin/devices" && request.method === "GET")
           return await handleAdminDevices(env);
         if (path === "/api/admin/devices/new" && request.method === "POST")
-          return await handleAdminNewDevice(request, env, url.origin);
+          return await handleAdminNewDevice(request, env, publicOrigin(request, url));
         if (path === "/api/admin/deploy" && request.method === "POST")
           return await handleAdminDeploy(request, env);
         if (path === "/api/admin/command" && request.method === "POST")
