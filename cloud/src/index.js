@@ -5,7 +5,7 @@
 // - 静态管理 UI（assets）
 
 const DEFAULT_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent";
-const MODELS = ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct-q4_k_m", "llama3.1:8b-instruct"];
+const MODELS = ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct-q4_k_m", "llama3.1:8b"];
 
 // ---------- 工具 ----------
 

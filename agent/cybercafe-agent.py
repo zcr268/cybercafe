@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -293,11 +293,11 @@ def step_ollama_start():
     raise DeployError("ollama 健康检查超时")
 
 def step_model_pull(model, progress_cb):
-    """流式拉取模型并回报百分比"""
+    """流式拉取模型并回报百分比；失败时带上输出尾部便于诊断"""
     p = subprocess.Popen(["docker", "exec", "ollama", "ollama", "pull", model],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, errors="replace", bufsize=1)
-    buf, last_pct, last_ts = "", -1, time.time()
+    buf, tail, last_pct, last_ts = "", [], -1, time.time()
     while True:
         ch = p.stdout.read(1)
         if not ch and p.poll() is not None:
@@ -306,16 +306,22 @@ def step_model_pull(model, progress_cb):
             continue
         buf += ch
         if ch in ("\n", "\r"):
-            m = re.search(r"(\d+)\s*%", buf)
+            line = buf.strip()
+            buf = ""
+            if not line:
+                continue
+            m = re.search(r"(\d+)\s*%", line)
             if m:
                 pct = int(m.group(1))
                 if pct != last_pct and (pct % 10 == 0 or time.time() - last_ts > DEPLOY_HEARTBEAT_INTERVAL):
                     last_pct, last_ts = pct, time.time()
                     progress_cb("model_pull", "running", "%s %d%%" % (model, pct))
-            buf = ""
+            elif "pulling" not in line and "verifying" not in line and "writing" not in line:
+                tail.append(line)
+                tail = tail[-5:]
     rc = p.wait()
     if rc != 0:
-        raise DeployError("模型拉取失败: " + model)
+        raise DeployError("模型拉取失败 %s: %s" % (model, " | ".join(tail)[-300:] or "无输出"))
     return "模型就绪: " + model
 
 NGINX_CONF_TMPL = """server {{
