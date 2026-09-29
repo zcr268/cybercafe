@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 HEARTBEAT_INTERVAL = 10         # 心跳间隔（秒）
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -308,7 +308,7 @@ def step_gateway(api_key):
     rc, out = run('curl -s -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" http://127.0.0.1:8000/v1/models' % api_key)
     if out.strip() != "200":
         raise DeployError("网关鉴权自检失败: http " + out.strip())
-    rc, out = run('curl -s -o /dev/null -w "%%{http_code}" http://127.0.0.1:8000/v1/models')
+    rc, out = run('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/v1/models')
     if out.strip() != "401":
         raise DeployError("网关未鉴权暴露! http " + out.strip())
     return "网关就绪（带Key鉴权+CORS）"
