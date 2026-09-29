@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -130,6 +130,10 @@ def collect_device_info():
 
 # ---------------------------------------------------------------- 资源用量采集
 
+# 跨心跳 CPU 差分：模块级保存上次 /proc/stat 样本 (idle, total, wall_ts)
+# 下次心跳用两次样本差值计算平均使用率；首次或间隔过短时用短窗口兜底
+_last_cpu_sample = None
+
 def _cpu_times():
     with open("/proc/stat") as f:
         parts = f.readline().split()[1:]
@@ -137,16 +141,58 @@ def _cpu_times():
     idle = vals[3] + (vals[4] if len(vals) > 4 else 0)  # idle + iowait
     return idle, sum(vals)
 
+def _cpu_short_sample():
+    """短窗口兜底采样（约 0.5s）：仅用于首次心跳/上次样本距今过短时。"""
+    i1, t1 = _cpu_times()
+    time.sleep(0.5)
+    i2, t2 = _cpu_times()
+    dt, di = t2 - t1, i2 - i1
+    if dt > 0:
+        return round(100.0 * (1 - di / dt), 1)
+    return None
+
+def _gpu_samples():
+    """GPU 利用率 1s 窗口内采样 3 次取最大（避开瞬时 0 快照）；
+    显存取最大利用率那次采样的真实值。无 GPU 时返回 None。"""
+    best = None
+    for i in range(3):
+        rc, out = run("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total "
+                      "--format=csv,noheader,nounits 2>/dev/null | head -1", timeout=15)
+        if rc == 0 and out.strip():
+            try:
+                gu, mu, mtot = [int(x.strip()) for x in out.strip().split(",")[:3]]
+            except ValueError:
+                pass
+            else:
+                if best is None or gu > best[0]:
+                    best = (gu, mu, mtot)
+        if i < 2:
+            time.sleep(0.4)
+    return best
+
 def collect_usage():
-    """采集 CPU/内存/GPU 用量。CPU 采样 0.2s 差值。"""
+    """采集 CPU/内存/GPU 用量。
+
+    CPU：跨心跳差分——模块级保存上次 /proc/stat 样本，下次心跳用两次样本差值算
+         平均使用率，间隔随 poll_after 变大的心跳自然拉长，空闲也显示真实小值；
+         首次采样（或间隔<1s）用 0.5s 短窗口兜底。
+    GPU：1s×3 多次采样取最大利用率（避开推理间隙的瞬时 0）；
+         显存保持真实上报（空闲时模型自动卸载导致低占用属正常，gpu_note 标注）。"""
     u = {}
+    global _last_cpu_sample
     try:
-        i1, t1 = _cpu_times()
-        time.sleep(0.2)
-        i2, t2 = _cpu_times()
-        dt, di = t2 - t1, i2 - i1
-        if dt > 0:
-            u["cpu_pct"] = round(100.0 * (1 - di / dt), 1)
+        idle, total = _cpu_times()
+        now = time.time()
+        if _last_cpu_sample is not None and now - _last_cpu_sample[2] >= 1.0:
+            _idle, _total, _ts = _last_cpu_sample
+            dt, di = total - _total, idle - _idle
+            if dt > 0:
+                u["cpu_pct"] = round(100.0 * (1 - di / dt), 1)
+        _last_cpu_sample = (idle, total, now)
+        if "cpu_pct" not in u:
+            v = _cpu_short_sample()
+            if v is not None:
+                u["cpu_pct"] = v
     except Exception:
         pass
     try:
@@ -163,17 +209,14 @@ def collect_usage():
             u["mem_total_gb"] = round(mt / 1048576, 1)
     except Exception:
         pass
-    rc, out = run("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total "
-                  "--format=csv,noheader,nounits 2>/dev/null | head -1", timeout=15)
-    if rc == 0 and out.strip():
-        try:
-            gu, mu, mtot = [int(x.strip()) for x in out.strip().split(",")[:3]]
-            u["gpu_util_pct"] = gu
-            u["gpu_mem_used_mb"] = mu
-            u["gpu_mem_total_mb"] = mtot
-            u["gpu_mem_pct"] = round(100.0 * mu / mtot, 1) if mtot else 0
-        except ValueError:
-            pass
+    gpu = _gpu_samples()
+    if gpu:
+        gu, mu, mtot = gpu
+        u["gpu_util_pct"] = gu
+        u["gpu_mem_used_mb"] = mu
+        u["gpu_mem_total_mb"] = mtot
+        u["gpu_mem_pct"] = round(100.0 * mu / mtot, 1) if mtot else 0
+        u["gpu_note"] = "模型已加载" if mu >= 256 else "模型未加载（空闲自动卸载，属正常）"
     return u
 
 # ---------------------------------------------------------------- 云端交互
