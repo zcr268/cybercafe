@@ -1,0 +1,24 @@
+services:
+  cloud:
+    build:
+      context: ../..
+      dockerfile: deploy/aliyun/Dockerfile
+    image: cybercafe-cloud:0.2.1
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?missing}
+    volumes:
+      - cybercafe-state:/data        # wrangler 本地 KV/Cache 持久化
+    ports:
+      - "127.0.0.1:8080:8080"        # 只对本机暴露，由 cloudflared 出公网
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?missing}
+    network_mode: host               # CF 隧道配置指向 localhost:8080，需宿主机网络
+    restart: unless-stopped
+    depends_on:
+      - cloud
+
+volumes:
+  cybercafe-state:
