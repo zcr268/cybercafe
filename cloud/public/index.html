@@ -31,7 +31,7 @@
   .state.deploying { background: #713f12; color: #fde047; }
   .state.failed { background: #7f1d1d; color: #fca5a5; }
   .state.queued { background: #1e3a8a; color: #93c5fd; }
-  .state.idle, .state.stopped { background: #334155; color: #cbd5e1; }
+  .state.idle, .state.stopped, .state.offline { background: #334155; color: #cbd5e1; }
   #login { max-width: 360px; margin: 15vh auto; }
   #logbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 180px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
   #chatbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 320px; overflow-y: auto; }
@@ -211,20 +211,24 @@ async function refresh() {
 function renderDevices() {
   $("devRows").innerHTML = devices.map(d => {
     const dep = d.deploy || {};
+    const isOn = d.online === true;   // 心跳语义：状态列主状态 = 在线/离线（非部署状态）
     const hw = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
       .filter(Boolean).join("<br>");
-    const usage = d.online ? usageBars(d.usage || {}) : "";
+    const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
-    const depBar = (dep.state && !["idle","stopped"].includes(dep.state))
+    const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
+    // 部署状态/进度条仅在设备在线时展示；离线明确显示「离线」，不残留旧的 dep.state=online
+    const deployInfo = isOn ? `
+      <br><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}
+      <br><span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
+      ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}` : "";
     return `<tr>
-      <td><span class="dot ${d.online ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
+      <td><span class="dot ${isOn ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span></td>
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
-      <td><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}<br>
-          <span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
-          ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}</td>
+      <td><span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}</td>
       <td><div class="row">
         <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
         <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
@@ -239,7 +243,8 @@ function renderDevices() {
 }
 
 function renderChatDevs() {
-  const online = devices.filter(d => d.deploy && safeUrl(d.deploy.tunnel_url));
+  // 聊天下拉：仅心跳在线（d.online）且存在可用隧道（含 model_api_key 依赖的 deploy 全量上报）的设备
+  const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url));
   const sel = $("chatDev");
   const cur = sel.value;
   sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.engine||"")} · ${esc(d.deploy.model||"")}）</option>`).join("");
@@ -344,7 +349,7 @@ async function send() {
   const d = devices.find(x => x.device_id === id);
   const text = $("chatIn").value.trim();
   if (!text) return;
-  const turl = safeUrl(d && d.deploy && d.deploy.tunnel_url);
+  const turl = safeUrl(d && d.online === true && d.deploy && d.deploy.tunnel_url);
   if (!turl) { toast("该设备没有可用隧道地址", false); return; }
   $("chatIn").value = "";
   addMsg("user", text);
@@ -379,7 +384,8 @@ $("chatIn").addEventListener("keydown", e => { if (e.key === "Enter") send(); })
 let refreshTimer = null;
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
-  const active = devices.some(d => ["queued", "deploying"].includes((d.deploy || {}).state));
+  // 变速刷新：仅在线设备处于部署中/排队时 2s 快轮询（离线设备进度不会推进）
+  const active = devices.some(d => d.online === true && ["queued", "deploying"].includes((d.deploy || {}).state));
   refreshTimer = setTimeout(async () => {
     if (!document.hidden) await refresh();
     scheduleRefresh();
