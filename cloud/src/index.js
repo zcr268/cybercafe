@@ -368,6 +368,19 @@ async function handleAdminListBatches(env) {
   return json({ ok: true, batches });
 }
 
+async function handleAdminDeleteBatch(env, code) {
+  // 删除 batch:<code>；顺带清理该批次 prov:machine 映射（避免孤儿映射长期残留）。
+  // 已注册设备记录（device:<id>）保留——agent 心跳/部署不受影响，仅该码无法再 provision 新机。
+  const rec = await env.CYBERCAFE_KV.get(`batch:${code}`, "json");
+  await env.CYBERCAFE_KV.delete(`batch:${code}`);
+  const keys = await kvListAll(env.CYBERCAFE_KV, "prov:machine:");
+  for (const k of keys) {
+    const m = await env.CYBERCAFE_KV.get(k.name, "json");
+    if (m && m.batch === code) await env.CYBERCAFE_KV.delete(k.name);
+  }
+  return json({ ok: true, removed: !!rec });
+}
+
 async function handleAdminNewDevice(request, env, origin) {
   const body = await request.json().catch(() => ({}));
   const key = randKey("cck-");
@@ -527,6 +540,9 @@ export default {
           return await handleAdminCreateBatch(request, env);
         if (path === "/api/admin/batches" && request.method === "GET")
           return await handleAdminListBatches(env);
+        const bm = path.match(/^\/api\/admin\/batches\/([^/]+)$/);
+        if (bm && request.method === "DELETE")
+          return await handleAdminDeleteBatch(env, decodeURIComponent(bm[1]));
         const m = path.match(/^\/api\/admin\/device\/([0-9a-f]{12})$/);
         if (m && request.method === "GET") return await handleAdminDeviceDetail(env, m[1]);
         if (m && request.method === "DELETE") return await handleAdminDeleteDevice(env, m[1]);

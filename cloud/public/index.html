@@ -10,8 +10,10 @@
   header { padding: 14px 20px; background: #1e293b; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #334155; }
   header h1 { font-size: 18px; margin: 0; }
   header .spacer { flex: 1; }
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; padding: 16px 20px; }
   @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .col-right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .batch-table th, .batch-table td { font-size: 12px; padding: 6px 4px; }
   .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
   .card h2 { margin: 0 0 12px; font-size: 15px; color: #94a3b8; }
   button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
@@ -82,29 +84,31 @@
     <div id="logbox">（点击设备行的「日志」查看）</div>
   </div>
 
-  <div class="card">
-    <h2>批次安装码（基础镜像批量装机）</h2>
-    <div class="row" style="margin-bottom:8px">
-      <button id="btnBatch">生成批次码</button>
-      <span style="font-size:12px;color:#64748b">镜像预置批次码后，实例首启自动注册设备（免逐台执行安装命令）</span>
+  <div class="col-right">
+    <div class="card">
+      <h2>直连聊天（经 CF 隧道 → 机器模型 API）</h2>
+      <div class="row" style="margin-bottom:10px">
+        <select id="chatDev"></select>
+        <span id="chatMeta" class="mono" style="color:#64748b"></span>
+      </div>
+      <div id="chatbox"></div>
+      <div class="chatin">
+        <input type="text" id="chatIn" placeholder="输入消息，回车发送…">
+        <button id="btnSend">发送</button>
+      </div>
     </div>
-    <table>
-      <thead><tr><th>批次码</th><th>备注</th><th>用量</th><th>有效期</th><th>创建</th></tr></thead>
-      <tbody id="batchRows"></tbody>
-    </table>
-    <div id="batchHint" style="margin-top:8px;font-size:12px;color:#64748b"></div>
-  </div>
 
-  <div class="card">
-    <h2>直连聊天（经 CF 隧道 → 机器模型 API）</h2>
-    <div class="row" style="margin-bottom:10px">
-      <select id="chatDev"></select>
-      <span id="chatMeta" class="mono" style="color:#64748b"></span>
-    </div>
-    <div id="chatbox"></div>
-    <div class="chatin">
-      <input type="text" id="chatIn" placeholder="输入消息，回车发送…">
-      <button id="btnSend">发送</button>
+    <div class="card">
+      <h2>批次安装码（基础镜像批量装机）</h2>
+      <div class="row" style="margin-bottom:8px">
+        <button id="btnBatch">生成批次码</button>
+        <span style="font-size:12px;color:#64748b">镜像预置批次码后，实例首启自动注册设备（免逐台执行安装命令）</span>
+      </div>
+      <table class="batch-table">
+        <thead><tr><th>批次码</th><th>用量</th><th>有效期</th><th>操作</th></tr></thead>
+        <tbody id="batchRows"></tbody>
+      </table>
+      <div id="batchHint" style="margin-top:8px;font-size:12px;color:#64748b"></div>
     </div>
   </div>
 </main>
@@ -182,15 +186,23 @@ async function loadBatches() {
       const st = expired ? "已过期" : full ? "已满" : "可用";
       const cls = (expired || full) ? "failed" : "online";
       return `<tr>
-        <td><span class="mono">${esc(b.code)}</span></td>
-        <td>${esc(b.label||"-")}</td>
+        <td><span class="mono">${esc(b.code)}</span>${b.label ? `<br><span style="color:#64748b;font-size:11px">${esc(b.label)}</span>` : ""}</td>
         <td>${b.used}/${b.quota == null ? "∞" : b.quota} <span class="state ${cls}">${st}</span></td>
-        <td>${b.expires ? new Date(b.expires*1000).toLocaleString() : "永久"}</td>
-        <td style="color:#64748b">${new Date((b.created||0)*1000).toLocaleString()}</td>
+        <td>${b.expires ? new Date(b.expires*1000).toLocaleDateString() : "永久"}</td>
+        <td><button class="sm red" onclick="delBatch('${esc(b.code)}')">删除</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="5" style="color:#64748b">暂无批次。点「生成批次码」创建。</td></tr>`;
+    }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无批次。点「生成批次码」创建。</td></tr>`;
   } catch (e) { /* 401 由 api() 统一处理 */ }
 }
+
+window.delBatch = async code => {
+  if (!confirm(`删除批次 ${code}？\n已注册的设备记录与 agent 心跳不受影响（仅删除批次码，之后该码无法再 provision 新机）。`)) return;
+  try {
+    const j = await api("/api/admin/batches/" + encodeURIComponent(code), { method: "DELETE" });
+    toast(j.removed ? "批次已删除: " + code : "批次不存在（已刷新）");
+    loadBatches();
+  } catch (e) { toast(e.message, false); }
+};
 
 function ago(ts) {
   if (!ts) return "-";
