@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -259,10 +259,17 @@ def report_progress(step, state, detail=""):
           "detail": detail[:500], "ts": int(time.time())})
 
 def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
-    heartbeat({"deploy": {"state": "online" if ok else "failed",
+    payload = {"deploy": {"state": "online" if ok else "failed",
                           "engine": engine, "model": model,
                           "tunnel_url": tunnel_url,
-                          "model_api_key": api_key, "ts": int(time.time())}})
+                          "model_api_key": api_key, "ts": int(time.time())}}
+    # 结果心跳为单次投递：真机偶发 TLS 握手超时（t4 实测复现）会整包丢失，
+    # 导致云管 deploy 记录缺 Key/隧道 → UI 聊天失效。重试 3 次直至成功。
+    for attempt in range(3):
+        if heartbeat(payload):
+            return
+        log("deploy 结果上报失败（第 %d 次），3s 后重试" % (attempt + 1))
+        time.sleep(3)
 
 # ---------------------------------------------------------------- 部署流水线
 

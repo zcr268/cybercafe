@@ -215,6 +215,11 @@ async function handleProgress(request, env, dev) {
     detail: body.detail || "",
     ts: body.ts || now,
   };
+  // 隧道/验证步骤回报 ok 时把公网地址固化进 deploy 记录（最终结果心跳偶发丢失也不影响 UI 聊天）
+  if (body.state === "ok" && (body.step === "tunnel" || body.step === "verify")) {
+    const m = (body.detail || "").match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+    if (m) rec.deploy.tunnel_url = m[0];
+  }
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
 
   // 追加进度日志（保留最近100条）
@@ -413,7 +418,9 @@ async function handleAdminDeploy(request, env) {
   const key = `device:${body.device_id}`;
   const rec = await env.CYBERCAFE_KV.get(key, "json");
   if (!rec) return json({ error: "device not found" }, 404);
-  rec.deploy = { state: "queued", engine, model, ts: Math.floor(Date.now() / 1000) };
+  // model_api_key 随排队指令落盘：即使最终结果心跳因真机网络偶发失败丢失，
+  // UI 聊天也能拿到本次部署的鉴权 Key（t4 真机验证发现：部署完成瞬间心跳 TLS 超时导致记录缺 Key）
+  rec.deploy = { state: "queued", engine, model, model_api_key: cmd.api_key, ts: Math.floor(Date.now() / 1000) };
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
   return json({ ok: true, command: { ...cmd, api_key: undefined } });
 }
