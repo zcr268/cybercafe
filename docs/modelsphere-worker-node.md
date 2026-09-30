@@ -278,3 +278,58 @@ k3s agent（= kubelet + containerd + flannel + kube-proxy）
 - ModelSphere 全栈在 k3s 上完整跑通（含无 runtimeClassName 适配）；
 - cu129 vs 驱动 535.274.02 实际行为（失败则换自建 cu122）；
 - 工作机常驻资源与 16GB 显存模型量级实测；A001-10-003 OS/CPU/磁盘补录。
+
+### 11. PoC 实测记录（2026-10-02，tower-zjc5pkgwm / 111.4.255.126 真机）
+
+#### 11.1 结论
+
+**部署成功。** ModelSphere 管理面最小集（autoconfig + openresty）+ 引擎（sglang，Qwen2.5-0.5B-Instruct）在本机 k3s 上完整跑通：
+
+- 引擎 POD `qwen-747d7c8446-*` **2/2 Running**（sglang + hang-watcher sidecar）；
+- `GET /qwen/v1/models` 返回模型清单（`owned_by: sglang, max_model_len: 4096`）；
+- 带 `Authorization: Bearer sk-ms-poc-test` 调 `/qwen/v1/chat/completions` → **200 + 完整 completion**（`content:"pong"`，usage 正常）；
+- 不带 Key → **HTTP 401**（鉴权生效）。
+
+#### 11.2 实测环境（真实数据）
+
+| 项 | 值 |
+|---|---|
+| 主机 | 111.4.255.126（tower-zjc5pkgwm），Ubuntu 24.04.3 / 内核 6.14 / 24C / 31GB / 408G |
+| GPU | RTX 4080 SUPER 16GB，驱动 580.178.04（CUDA 13.0）——**cu129 引擎镜像原生兼容，无需自建 cu122**（§10.4 待验证项之一解除） |
+| 容器运行时 | 宿主级 k3s v1.36.4+k3s1 单节点（非容器化），containerd 2.3.4-k3s1.36 |
+| GPU 注入 | k3s `--default-runtime=nvidia`（宿主已装 nvidia-container-runtime）+ k8s-device-plugin v0.15.0-rc.2 DaemonSet → `nvidia.com/gpu=1` allocatable；无 runtimeClassName 的 POD 直接拿 GPU（gpu-test POD 通过） |
+| 镜像 | sglang 引擎 `lmsysorg/sglang:v0.5.15-cu129`（19GB，docker save → `k3s ctr images import`）；4pdosc 管理面镜像经 `docker.1ms.run` 镜像加速拉取后导入 |
+| 权重 | `/mnt/disk0/models/Qwen/Qwen2.5-0.5B-Instruct`（954MB 完整，modelCheck 校验通过），引擎 chart `model.localPath` hostPath 直挂 |
+| Helm | `modelsphere/autoconfig-0.4.0`、`modelsphere/openresty-0.1.20`（key `sk-ms-poc-test`）、`modelsphere/sglang-0.8.5`，均 deployed |
+
+#### 11.3 与 §10.2 的差异适配点（真实路径，未 mock）
+
+1. **k3d 容器沙箱失败复盘**（PoC §10 步骤②最小验证）：
+   - k3d 节点容器（rancher/k3s 镜像，alpine/musl）内挂载宿主 toolkit 后，nvidia-container-runtime（glibc 二进制）报 `fork/exec /proc/self/fd/6: exec format error`——**宿主导 glibc runc 在 musl 容器内 init memfd re-exec 失败**；k3s 自带 runc 可 `run` 但 containerd shim 的 `create` 路径同样 ENOEXEC；经 2×2 矩阵（二进制位置 × run/create 命令）与静态 runc（1.2.6 static-pie）交叉验证均失败 → 判定**容器内 OCI 运行时链（wrapper→runc）在 alpine 节点容器内不可行**。
+   - 官方镜像对照实验确认问题在"自建 CUDA 基座 + 宿主工具链挂载"组合，k3s 官方镜像本身在 k3d 中工作正常。
+2. **转向宿主级 k3s**（§10.2 步骤②的替代形态，更贴近生产口径）：k3s 以进程级运行（nohup，无 systemd 足迹），宿主原生 glibc 环境无上述问题，一次通过。
+3. **gpu-operator 未使用**（§10.2 步骤③适配）：容器化节点内 gpu-operator 的 containerd 重启机制（systemd/hostPath 注入）不适用；采用等价渲染形态"**宿主预装驱动 + `--default-runtime=nvidia` + device-plugin DaemonSet**"。
+4. **网络按用户口径不作为考虑项**：Docker Hub 直连被墙属预期外；实际经 daocloud/1ms 镜像加速 + 本地 `docker save/ctr import` 兜底；ModelRoute 等 CRD 经 `helm show crds modelsphere/llm-slo-decision-gen` 提取安装（autoconfig 控制器依赖 `LLMSLORequirement` CRD）。
+
+#### 11.4 部署结果明细
+
+- 命名空间：`llm-route`（管理面）、`llm-demo`（引擎）；
+- POD：`autoconfig-* 1/1 Running`、`openresty-* 2/2 Running`（router + reload sidecar）、`qwen-* 2/2 Running`、`nvidia-device-plugin-* 1/1 Running`、coredns/local-path/metrics 正常；
+- CRD：`modelroutes.routing.modelsphere.dev`、`llmslorequirements.inference.modelsphere.dev`；
+- 生产设备（9e4eb005e463）共存验证：ollama `127.0.0.1:11434` HTTP 200、chatgw 8000 401（鉴权正常）、cloudflared 20241 存活——全程未受影响。
+
+#### 11.5 E2E 证据（原样节选）
+
+```
+无 Key   → HTTP=401
+带 Key   → {"id":"4f129d...","object":"chat.completion","model":"Qwen/Qwen2.5-0.5B-Instruct",
+            "choices":[{"message":{"role":"assistant","content":"pong"}}],
+            "usage":{"prompt_tokens":31,"completion_tokens":2,"total_tokens":33}}
+/v1/models → {"data":[{"id":"Qwen/Qwen2.5-0.5B-Instruct","owned_by":"sglang","max_model_len":4096}]}
+```
+
+#### 11.6 遗留项（不阻塞主目标）
+
+- `qwen-cart`（cache-aware router）POD init `wait-workers` 未就绪——路由当前由 openresty 直连引擎后端，**不影响 E2E**；待查 chart 内 init 等待逻辑（推测等 peer/ConfigMap 同步）；
+- 引擎资源实测（RSS/VRAM）与 16GB 显存更大模型量级验证留待后续；
+- 回滚路径：宿主 k3s 可 `kill k3s-server` + 删除 `/var/lib/rancher/k3s`、`/etc/rancher/k3s` 完全还原（未启用 systemd/开机自启）。
