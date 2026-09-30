@@ -5,6 +5,11 @@
 #   批次模式（基础镜像批量装机）: bash install.sh --batch <批次码>   （或环境变量 PROVISION_CODE）
 #     批次模式下 API 地址取 PROVISION_API_BASE 环境变量 / /etc/cybercafe/api_base /
 #     provision.sh 已写入的 /opt/cybercafe/config.env；设备密钥由云端 /api/device/provision 颁发
+#   镜像预置模式（刻录基础镜像前执行，仅预置批次码+首启注册逻辑，不装 agent）:
+#     bash install.sh --image-prep --batch <批次码> --api-base <云管理地址>
+#     等价于: 写 /etc/cybercafe/batch.code + /etc/cybercafe/api_base → 安装
+#     provision.sh + cybercafe-provision.service（oneshot, enable）→ 镜像每实例首启自动注册
+#     （--root <目录> 可指定目标根，供构建器/临时目录 dry-run 验证）
 set -euo pipefail
 
 API_BASE="__API_BASE__"
@@ -12,25 +17,68 @@ DEVICE_KEY="__DEVICE_KEY__"
 INSTALL_DIR="/opt/cybercafe"
 SERVICE_NAME="cybercafe-agent"
 BATCH_CODE="${PROVISION_CODE:-}"
+IMAGE_PREP=""
+IMAGE_ROOT=""
 
-# 批次码参数: --batch <code> 或 --batch=<code>
+# 参数: --batch <code> | --image-prep | --api-base <url> | --root <dir>
 while [ $# -gt 0 ]; do
   case "$1" in
     --batch) BATCH_CODE="${2:-}"; shift 2 ;;
     --batch=*) BATCH_CODE="${1#--batch=}"; shift ;;
-    *) echo "[cybercafe] ERROR: 未知参数: $1（支持 --batch <批次码>）" >&2; exit 1 ;;
+    --image-prep) IMAGE_PREP=1; shift ;;
+    --api-base) PROVISION_API_BASE="${2:-}"; shift 2 ;;
+    --api-base=*) PROVISION_API_BASE="${1#--api-base=}"; shift ;;
+    --root) IMAGE_ROOT="${2:-}"; shift 2 ;;
+    --root=*) IMAGE_ROOT="${1#--root=}"; shift ;;
+    *) echo "[cybercafe] ERROR: 未知参数: $1（支持 --batch <批次码> / --image-prep / --api-base <url> / --root <dir>）" >&2; exit 1 ;;
   esac
 done
 
 echo "[cybercafe] 安装开始 (API=$API_BASE)"
 
-if [ "$(id -u)" != "0" ]; then
-    echo "[cybercafe] ERROR: 需要 root 运行" >&2
-    exit 1
+# root 检查：--image-prep --root <临时目录> 验证场景允许非 root（写的是临时根，非系统路径）
+if [ -z "$IMAGE_PREP" ] || [ -z "$IMAGE_ROOT" ]; then
+    if [ "$(id -u)" != "0" ]; then
+        echo "[cybercafe] ERROR: 需要 root 运行" >&2
+        exit 1
+    fi
 fi
 # 注意：占位符拆分拼接，避免云端注入时把校验逻辑本身也替换掉
 PH_KEY="__DEVICE_""KEY__"
 PH_API="__API_""BASE__"
+
+# ---------- 镜像预置模式（仅基础镜像构建/刻录前使用，exit 后不进入正常安装流程） ----------
+if [ -n "$IMAGE_PREP" ]; then
+    API_BASE="${PROVISION_API_BASE:-}"
+    P="${IMAGE_ROOT:-}"
+    if [ -z "$BATCH_CODE" ]; then
+        echo "[cybercafe] ERROR: --image-prep 需要 --batch <批次码>" >&2
+        exit 1
+    fi
+    if [ -z "$API_BASE" ]; then
+        echo "[cybercafe] ERROR: --image-prep 需要 --api-base <云管理地址> 或环境变量 PROVISION_API_BASE" >&2
+        exit 1
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ ! -f "$SCRIPT_DIR/provision.sh" ] || [ ! -f "$SCRIPT_DIR/cybercafe-provision.service" ]; then
+        echo "[cybercafe] ERROR: 需要与 install.sh 同目录的 provision.sh 与 cybercafe-provision.service（来自仓库 agent/）" >&2
+        exit 1
+    fi
+    mkdir -p "${P}/etc/cybercafe" "${P}${INSTALL_DIR}" "${P}/etc/systemd/system/multi-user.target.wants"
+    printf '%s\n' "$BATCH_CODE" > "${P}/etc/cybercafe/batch.code"
+    printf '%s\n' "$API_BASE"    > "${P}/etc/cybercafe/api_base"
+    cp "$SCRIPT_DIR/provision.sh" "${P}${INSTALL_DIR}/provision.sh"
+    chmod 755 "${P}${INSTALL_DIR}/provision.sh"
+    cp "$SCRIPT_DIR/cybercafe-provision.service" "${P}/etc/systemd/system/cybercafe-provision.service"
+    # enable 的实质（构建期可能无 systemd 运行，systemctl 不可用）：wants symlink
+    ln -sf /etc/systemd/system/cybercafe-provision.service "${P}/etc/systemd/system/multi-user.target.wants/cybercafe-provision.service"
+    echo "[cybercafe] ✅ 镜像预置完成（root=${P}）"
+    echo "  - 批次码:   $(cat "${P}/etc/cybercafe/batch.code")"
+    echo "  - API:      $(cat "${P}/etc/cybercafe/api_base")"
+    echo "  - provision: ${INSTALL_DIR}/provision.sh + cybercafe-provision.service（oneshot, enabled）"
+    echo "  镜像每实例首启将自动执行: machine-id → POST /api/device/provision → 领 cck- key → install.sh --batch → .provisioned"
+    exit 0
+fi
 
 mkdir -p "$INSTALL_DIR"
 

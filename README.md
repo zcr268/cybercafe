@@ -50,20 +50,25 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 
 面向「同一基础镜像批量开实例」场景：镜像内预置 **provision 首启服务 + 批次码**，实例首次开机自动注册设备，无需逐台执行安装命令；镜像内不写死单一设备密钥（每台领取独立 `cck-` key）。
 
-1. 云管理端点「批次安装码」→ 生成批次码（`ccb-`，含配额/备注/可选有效期）
-2. 制作镜像时预置：
-   - `echo <批次码> > /etc/cybercafe/batch.code`（或环境变量 `PROVISION_CODE`）
-   - `echo https://<云管理域名> > /etc/cybercafe/api_base`（或 `PROVISION_API_BASE`）
-   - 拷贝 `agent/provision.sh` 与 `agent/cybercafe-provision.service` 到 `/opt/cybercafe/` 与 `/etc/systemd/system/`，`systemctl enable cybercafe-provision.service`
+1. 云管理端点「批次安装码」→ 生成批次码（`ccb-`，**配额不填=无限**，或显式填数量限台数；备注/可选有效期）
+2. 制作镜像时预置（v0.3.3 起推荐一条命令）：
+   ```bash
+   # 在仓库 agent/ 目录（install.sh/provision.sh/cybercafe-provision.service 同目录）执行：
+   bash install.sh --image-prep --batch <批次码> --api-base https://<云管理域名>
+   # 等价手工步骤：写 /etc/cybercafe/batch.code + /etc/cybercafe/api_base → 拷贝
+   # provision.sh 到 /opt/cybercafe/ + cybercafe-provision.service 到 /etc/systemd/system/ 并 enable
+   # --root <目录> 可指定目标根（构建器/临时目录 dry-run 验证用）
+   ```
 3. 实例开机 → systemd oneshot 跑 `provision.sh`：
    - 采集 `/etc/machine-id` 作为 `machine_id` → POST `/api/device/provision`（批次码为装机凭证）
-   - 云端校验批次有效且配额未满：同一 `machine_id` 复用原 key（不耗配额），否则生成 `cck-` key 并计数
+   - 云端校验批次有效：同一 `machine_id` 复用原 key（不耗配额）；显式限量的批次配额满时拒绝新机，无限批次（quota=null）不受限
    - 返回 key+API 写入 `/opt/cybercafe/config.env` → 调用 `install.sh --batch` 装 agent → 写 `/opt/cybercafe/.provisioned` 防重复
-4. 设备列表自动出现该实例（带「批次」来源标签），配额在批次卡实时展示（用量 used/quota，满/过期自动标红）
+4. 设备列表自动出现该实例（带「批次」来源标签），批次卡实时展示用量（used/quota，无限显示 ∞，满/过期自动标红）
 
 - 单机直装也可用批次模式：`PROVISION_API_BASE=<域名> bash install.sh --batch <批次码>`（或 `PROVISION_CODE` 环境变量）；现有单机模式（`?key=` 注入）完全不受影响。
+- 批次配额：`POST /api/admin/batches` 的 `quota` 字段可选——不填/空 = 无限（KV `quota:null`，provision 跳过配额检查）；显式填数量才限（>=1 整数）。已建批次（明确 quota）语义不变。
 - KV key 约定：`batch:<code>`（label/quota/used/created/expires）、`prov:machine:<machine_id>`（key 映射）、`devicekey:<hash>`（沿用，新增 batch/machine_id 字段）。
-- 完整真机验收（打镜像→开实例→首启自动注册→配额计数）由测试成员按 t9 执行。
+- 完整真机验收（打镜像→开实例→首启自动注册→配额/无限）由测试成员按 t9 执行。
 
 ## 推理引擎（v0.3.0 起支持三引擎）
 

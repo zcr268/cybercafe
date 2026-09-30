@@ -61,9 +61,11 @@ ExecStart=/opt/cybercafe/provision.sh
 [Install]
 WantedBy=multi-user.target
 UNITEOF
-    systemctl daemon-reload
     systemctl enable cybercafe-provision.service >/dev/null 2>&1 || true
 fi
+# 镜像预置（install.sh --image-prep）可能在构建期无 systemd 时已写入单元，首启时兜底刷新；
+# 无 systemd 环境（镜像构建期）失败不影响主体逻辑
+systemctl daemon-reload || true
 
 # 1) machine_id
 MACHINE_ID="$(cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || echo "unknown-$(hostname)")"
@@ -113,4 +115,4 @@ fi
 
 # 5) 首启标记
 echo "provisioned $(date -u +%Y-%m-%dT%H:%M:%SZ) batch=$BATCH_CODE machine=$MACHINE_ID" > "$MARKER"
-echo "[cybercafe] ✅ 首启 provision 完成（批次 $BATCH_CODE，设备 $DEVICE_KEY）"
+echo "[cybercafe] ✅ 首启 provision 完成（批次 ${BATCH_CODE}，设备 ${DEVICE_KEY}）"

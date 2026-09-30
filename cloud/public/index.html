@@ -152,21 +152,22 @@ $("btnAddDev").onclick = async () => {
 };
 
 $("btnBatch").onclick = async () => {
-  const quotaIn = prompt("批次配额（允许注册的设备台数）:", "10");
+  const quotaIn = prompt("批次配额（允许注册的设备台数，不填=无限）:", "");
   if (quotaIn === null) return;
-  const quota = parseInt(quotaIn, 10);
-  if (!(quota >= 1)) { toast("配额需为 >=1 的整数", false); return; }
+  const quota = quotaIn.trim() === "" ? null : parseInt(quotaIn, 10);
+  if (quota !== null && !(quota >= 1)) { toast("配额需为 >=1 的整数（不填=无限）", false); return; }
   const label = prompt("批次备注（可空，如：门店A-20260929）:") || "";
   const daysIn = prompt("有效期（天，可空=永不过期）:", "");
-  const body = { quota, label };
+  const body = { label };
+  if (quota !== null) body.quota = quota;
   if (daysIn && !isNaN(parseInt(daysIn, 10)) && parseInt(daysIn, 10) > 0)
     body.expires = Math.floor(Date.now()/1000) + parseInt(daysIn, 10) * 86400;
   try {
     const j = await api("/api/admin/batches", { method: "POST", body: JSON.stringify(body) });
     toast("批次码已生成: " + j.code);
-    $("batchHint").innerHTML = `新批次 <b class="mono">${esc(j.code)}</b>（配额 ${j.quota}${j.expires ? "，有效期至 " + new Date(j.expires*1000).toLocaleString() : ""}）已生成。<br>
-      镜像预置 ① 写批次码 <span class="mono">echo ${esc(j.code)} > /etc/cybercafe/batch.code</span>；
-      ② 预置 <span class="mono">agent/provision.sh</span> + <span class="mono">cybercafe-provision.service</span>（systemd oneshot）。
+    $("batchHint").innerHTML = `新批次 <b class="mono">${esc(j.code)}</b>（配额 ${j.quota == null ? "∞ 无限" : j.quota}${j.expires ? "，有效期至 " + new Date(j.expires*1000).toLocaleString() : ""}）已生成。<br>
+      镜像预置一条命令：<span class="mono">bash install.sh --image-prep --batch ${esc(j.code)} --api-base &lt;云管理地址&gt;</span><br>
+      （等价手工步骤：写 <span class="mono">/etc/cybercafe/batch.code</span> + <span class="mono">/etc/cybercafe/api_base</span>，预置 <span class="mono">agent/provision.sh</span> + <span class="mono">cybercafe-provision.service</span> 并 enable）
       实例首次开机自动向 /api/device/provision 注册并领取 cck- 设备密钥，无需逐台执行安装命令。`;
     loadBatches();
   } catch (e) { toast(e.message, false); }
@@ -176,14 +177,14 @@ async function loadBatches() {
   try {
     const j = await api("/api/admin/batches");
     $("batchRows").innerHTML = j.batches.map(b => {
-      const full = (b.used || 0) >= (b.quota || 0);
+      const full = b.quota != null && (b.used || 0) >= b.quota;
       const expired = b.expired;
       const st = expired ? "已过期" : full ? "已满" : "可用";
       const cls = (expired || full) ? "failed" : "online";
       return `<tr>
         <td><span class="mono">${esc(b.code)}</span></td>
         <td>${esc(b.label||"-")}</td>
-        <td>${b.used}/${b.quota} <span class="state ${cls}">${st}</span></td>
+        <td>${b.used}/${b.quota == null ? "∞" : b.quota} <span class="state ${cls}">${st}</span></td>
         <td>${b.expires ? new Date(b.expires*1000).toLocaleString() : "永久"}</td>
         <td style="color:#64748b">${new Date((b.created||0)*1000).toLocaleString()}</td>
       </tr>`;

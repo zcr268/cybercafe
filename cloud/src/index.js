@@ -258,7 +258,8 @@ async function handleDeviceProvision(request, env, url) {
     keyHash = await sha256hex(key);
   } else {
     if (batch.expires && now > batch.expires) return json({ error: `batch ${code} expired` }, 403);
-    if ((batch.used || 0) >= batch.quota) return json({ error: `batch ${code} quota full` }, 403);
+    // 配额满检查仅对显式限量的批次生效（quota:null = 无限）
+    if (batch.quota != null && (batch.used || 0) >= batch.quota) return json({ error: `batch ${code} quota full` }, 403);
     key = randKey("cck-");
     keyHash = await sha256hex(key);
     await env.CYBERCAFE_KV.put(`devicekey:${keyHash}`,
@@ -320,8 +321,13 @@ async function handleAdminDevices(env) {
 
 async function handleAdminCreateBatch(request, env) {
   const body = await request.json().catch(() => ({}));
-  const quota = parseInt(body.quota, 10);
-  if (!Number.isInteger(quota) || quota < 1) return json({ error: "quota 需为 >=1 的整数" }, 400);
+  // quota 可选：不填（undefined/null/空串）= 无限（KV quota:null，provision 跳过配额检查）；
+  // 显式填数量才限。兼容已建批次（quota 明确值）语义不变。
+  let quota = null;
+  if (body.quota !== undefined && body.quota !== null && body.quota !== "") {
+    quota = parseInt(body.quota, 10);
+    if (!Number.isInteger(quota) || quota < 1) return json({ error: "quota 需为 >=1 的整数（不填=无限）" }, 400);
+  }
   const now = Math.floor(Date.now() / 1000);
   let expires = body.expires;
   if (typeof expires === "string" && expires) {
@@ -354,7 +360,7 @@ async function handleAdminListBatches(env) {
   const batches = [];
   for (const rec of recs) {
     if (!rec) continue;
-    rec.remaining = Math.max(0, (rec.quota || 0) - (rec.used || 0));
+    rec.remaining = rec.quota == null ? null : Math.max(0, rec.quota - (rec.used || 0));
     rec.expired = !!(rec.expires && now > rec.expires);
     batches.push(rec);
   }
