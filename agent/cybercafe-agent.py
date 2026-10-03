@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.6"
+VERSION = "0.3.7"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -30,6 +30,7 @@ import time
 import traceback
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 # ---------------------------------------------------------------- 基础工具
 
@@ -458,8 +459,35 @@ def _wait_openai_ready(engine, model, progress_cb, step="engine_start"):
 # 约束（t21 调研 docs/strata-feasibility.md）：驱动>=580（MIN_DRIVER）、内存>=31GB（Coder IQ1_M tight）、
 # 磁盘>=80GB（~66GB 下载）；low-RAM resident 模式自动容纳；单并发。COW 快照机重启丢数据，需重装/重拉。
 
+def _cuda_env():
+    """探测已安装的 CUDA toolkit（/usr/local/cuda* 或 /opt/cuda*），返回注入 PATH/LD_LIBRARY_PATH 的前缀。
+
+    t23 真机复现：CUDA 12.2 已装于 /usr/local/cuda-12.2 但 agent systemd 环境 PATH 不含 /usr/local/cuda/bin，
+    setup.sh 内 CMake enable_language(CUDA) 找不到 nvcc → 编译器 ID 探测失败中止。这里把 toolkit bin/lib64
+    主动加入子进程环境（setup.sh 的 sudo apt 安装路径同理）。找不到时返回空串（让 setup.sh 自行安装）。
+    """
+    cands = []
+    for base in ("/usr/local", "/opt"):
+        try:
+            cands += [p for p in sorted(Path(base).glob("cuda*"), reverse=True)
+                      if (p / "bin" / "nvcc").is_file()]
+        except OSError:
+            pass
+    if not cands:
+        return ""
+    b = cands[0]  # 版本号最大者优先（sorted 字典序对 cuda-12.2 > cuda-12.10 不成立，再按版本排）
+    def _ver(p):
+        m = re.search(r"cuda[.-]?(\d+)\.(\d+)", str(p))
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    b = max(cands, key=_ver)
+    bindir, libdir = b / "bin", b / "lib64"
+    parts = ["PATH=%s:$PATH" % bindir]
+    if libdir.is_dir():
+        parts.append("LD_LIBRARY_PATH=%s:$LD_LIBRARY_PATH" % libdir)
+    return " ".join(parts) + " "
+
 def step_strata_check():
-    """环境预检：驱动 >= 580 / 内存 >= 31GB / 磁盘 >= 80GB"""
+    """环境预检：驱动 >= 580 / 内存 >= 31GB / 磁盘 >= 80GB / CUDA nvcc 可用"""
     cfg = ENGINES["strata"]
     rc, out = run("nvidia-smi --query-gpu=driver_version --format=csv,noheader", timeout=30)
     if rc != 0:
@@ -473,6 +501,15 @@ def step_strata_check():
         raise DeployError("无法解析驱动版本: %s" % ver)
     if ver_t < (int(cfg["min_driver"]),):
         raise DeployError("Strata 要求驱动 >= %s（MIN_DRIVER 580/CUDA 13.0），当前 %s" % (cfg["min_driver"], ver))
+    # CUDA toolkit 预检：nvcc 需可达（systemd 环境 PATH 常缺 /usr/local/cuda/bin，这里主动探测并注入）
+    cuda_env = _cuda_env()
+    rc, out = run(cuda_env + "nvcc --version", timeout=30)
+    if rc != 0 or "release" not in out:
+        raise DeployError("未找到可用的 CUDA nvcc（Strata 需要本地编译引擎）。"
+                          "已扫描 /usr/local/cuda* 与 /opt/cuda*，请安装 CUDA Toolkit 12.x/13.x "
+                          "（Ubuntu: sudo apt install nvidia-cuda-toolkit，或从 developer.nvidia.com 装）")
+    nvcc_v = re.search(r"release (\d+)\.(\d+)", out)
+    nvcc_str = nvcc_v.group(0) if nvcc_v else "版本未知"
     # 内存
     rc, out = run("awk '/MemTotal/{print $2}' /proc/meminfo", timeout=10)
     mem_gb = (int(out.strip()) if rc == 0 and out.strip() else 0) / 1024 / 1024
@@ -483,7 +520,7 @@ def step_strata_check():
     disk_gb = (int(out.strip()) if rc == 0 and out.strip().isdigit() else 0) / 1024**3
     if disk_gb < cfg["min_disk_gb"]:
         raise DeployError("Strata 模型 ~66GB，要求可用磁盘 >= %sGB，当前 %.1fGB" % (cfg["min_disk_gb"], disk_gb))
-    return "环境预检通过: 驱动 %s / 内存 %.1fGB / 磁盘 %.1fGB" % (ver, mem_gb, disk_gb)
+    return "环境预检通过: 驱动 %s / nvcc %s / 内存 %.1fGB / 磁盘 %.1fGB" % (ver, nvcc_str, mem_gb, disk_gb)
 
 def _strata_installed(cfg):
     """模型数据已就绪判定：run 配置 + 模型数据目录存在。
@@ -512,7 +549,8 @@ def step_strata_setup(progress_cb):
             raise DeployError("Strata 仓库克隆失败: " + out[-300:])
     args = " ".join(cfg["setup_args"])
     # HF 权重走 hf-mirror 镜像站（大陆可达）；安装过程可能长达数小时，每 15s 回报进度
-    cmd = "cd %s && HF_ENDPOINT=https://hf-mirror.com ./setup.sh %s" % (d, args)
+    # CUDA env 注入：setup.sh 内 CMake 需 nvcc 可达（t23 真机：PATH 缺 /usr/local/cuda/bin 导致编译中止）
+    cmd = "cd %s && %sHF_ENDPOINT=https://hf-mirror.com ./setup.sh %s" % (d, _cuda_env(), args)
     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, errors="replace", bufsize=1)
     start_ts = time.time()
@@ -564,10 +602,11 @@ def step_strata_start(model, progress_cb):
     if not _strata_installed(cfg):
         raise DeployError("Strata 未安装，先执行 strata_setup")
     # 直接以 venv python 启动 serve/server.py（config=安装时生成的 strata-coder-iq1_m.json，
-    # 端口 11434 = 容器引擎同端口，nginx 网关不变；--open 免开浏览器）
-    rc, out = run("cd %s && nohup .venv/bin/python serve/server.py --engine strata "
+    # 端口 11434 = 容器引擎同端口，nginx 网关不变；--open 免开浏览器）。
+    # CUDA env 注入：运行时若需调 nvcc/工具链（t23 复现：systemd PATH 缺 CUDA bin 会导致找不到）
+    rc, out = run("cd %s && %snohup .venv/bin/python serve/server.py --engine strata "
                   "--config strata-coder-iq1_m.json --port %s > /tmp/strata.log 2>&1 & echo $!"
-                  % (d, cfg["port"]), timeout=60)
+                  % (d, _cuda_env(), cfg["port"]), timeout=60)
     if rc != 0:
         raise DeployError("Strata 启动失败: " + out[-300:])
     return _wait_openai_ready("strata", model, progress_cb, step="strata_start")
