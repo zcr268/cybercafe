@@ -107,6 +107,27 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 - `cybercafe-agent.py`：启动采集设备信息注册；每 10s 心跳上报状态并拉取指令；部署流水线逐节点上报进度；云端脚本版本变化时自动下载替换并重启（自更新）
 - 支持的指令：`deploy`（部署模型）、`stop`（停止容器）、`restart_tunnel`（重建隧道并上报新域名）
 
+## 统一一键卸载（uninstall-all.sh，v0.3.7+）
+
+用户明确：**所有清理 = 所有引擎 + 所有模型**。`uninstall-all.sh`（仓库根目录）是统一入口，一键清掉全部部署内容，只保留脚本本身。
+
+```bash
+# 先看将被删什么（只读，推荐先执行）：
+bash uninstall-all.sh --dry-run
+# 交互确认后执行（或 --yes 跳过确认）：
+bash uninstall-all.sh
+# 也清 NVIDIA 驱动/容器 toolkit 的说明（默认不执行）：
+bash uninstall-all.sh --purge-all
+```
+
+覆盖范围：
+- **引擎**：ollama / vLLM / SGLang / Strata / OCR（t24）/ MiniMax H3（t25）及未来接入的引擎——停进程（`serve/server.py`/`sglang`/`vllm`/`ollama`）、删容器（`ollama vllm sglang chatgw cloudflared`）、删镜像（引擎+网关+隧道仓库与悬空镜像）、删数据卷（`ollama vllm-hf sglang-hf`）、清宿主二进制与 pip 依赖（best-effort）、删目录；
+- **模型内容**：Ollama models（卷内）、HF 缓存（`/root/.cache/huggingface|modelscope|torch|rapidocr|onnxruntime|onnx`）、Strata 数据（`/opt/strata` + `Strata-data`，~66GB）、OCR 模型、MiniMax H3 权重（`/opt/minimax-h3`）、原生 sglang 残留（`/models`）；
+- **默认保留（系统级留白）**：NVIDIA 驱动、nvidia-container-toolkit、docker、containerd、cybercafe agent（`/opt/cybercafe`）与 systemd 服务；`--purge-all` 仅给出清驱动的手动步骤说明（需先 unhold nvidia-* 再 purge，且需重装驱动，默认不执行）；
+- 执行后自动输出**核对清单**（进程/容器/镜像/卷/目录/端口/驱动/agent），残留即报错退出（非零）。
+
+⚠️ **警告**：此操作删除**全部模型与引擎数据，不可恢复**，需用户确认后执行。脚本必须存放在清理目录之外（如 `/root/uninstall-all.sh`，脚本自带自删防护检查）。新增引擎请在脚本配置区登记（容器/镜像仓库/卷/目录/进程模式），t24/t25 若提供各自 `uninstall.sh` 会被自动聚合调用。
+
 ## 脚本分发通道（raw / jsDelivr / 本地挂载，v0.3.3 云管理端加固）
 
 云管理端下发 `install.sh` / `cybercafe-agent.py` 走三通道（见 `cloud/src/index.js`「脚本/文件分发通道」）：
