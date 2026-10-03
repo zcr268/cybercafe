@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -465,11 +465,13 @@ def step_strata_check():
     if rc != 0:
         raise DeployError("nvidia-smi 不可用: " + out.strip()[:200])
     ver = (out.strip().splitlines() or [""])[0].strip()
+    # 驱动版本为 X.Y.Z 三段式（如 580.178.04），float() 无法解析多个小数点；
+    # 按数值 tuple 比较（主版本即门槛，580.x.y 均放行）
     try:
-        ver_f = float(ver)
+        ver_t = tuple(int(x) for x in ver.split(".") if x)
     except ValueError:
         raise DeployError("无法解析驱动版本: %s" % ver)
-    if ver_f < cfg["min_driver"]:
+    if ver_t < (int(cfg["min_driver"]),):
         raise DeployError("Strata 要求驱动 >= %s（MIN_DRIVER 580/CUDA 13.0），当前 %s" % (cfg["min_driver"], ver))
     # 内存
     rc, out = run("awk '/MemTotal/{print $2}' /proc/meminfo", timeout=10)
