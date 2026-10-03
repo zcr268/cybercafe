@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.7"
+VERSION = "0.3.8"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -486,8 +486,60 @@ def _cuda_env():
         parts.append("LD_LIBRARY_PATH=%s:$LD_LIBRARY_PATH" % libdir)
     return " ".join(parts) + " "
 
+# CUDA 主版本 → nvcc 支持的宿主 gcc 上限（host_config.h #error 硬限制；12.x 不支持 gcc>12）
+CUDA_GCC_LIMIT = {11: 11, 12: 12, 13: 13}
+
+def _cuda_ver():
+    """探测 nvcc 版本 → (major, minor) 或 None"""
+    env = _cuda_env()
+    rc, out = run(env + "nvcc --version", timeout=30)
+    m = re.search(r"release (\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if rc == 0 and m else None
+
+def _host_gcc_major():
+    rc, out = run("gcc --version", timeout=15)
+    m = re.search(r"gcc \(.*?\) (\d+)\.", out)
+    return int(m.group(1)) if rc == 0 and m else None
+
+def _gcc_env():
+    """nvcc/gcc 版本兼容修复（t23 真机确诊：CUDA 12.2 只支持宿主 gcc<=12，机器是 gcc 13.3）。
+
+    返回隔离 PATH 前缀：把 gcc-<limit>/g++-<limit>（缺失时 apt 安装）经软链目录前置到 PATH——
+    nvcc 与 CMake 从 PATH 找宿主编译器即得到兼容 gcc，系统 /usr/bin/gcc(13) 原样保留，
+    不影响 python/其他进程。宿主 gcc 已兼容或无需修复时返回""（无前缀）。"""
+    cuda = _cuda_ver()
+    if not cuda:
+        return ""
+    limit = CUDA_GCC_LIMIT.get(cuda[0], 13)
+    host = _host_gcc_major()
+    if host is not None and host <= limit:
+        return ""
+    gcc_bin = shutil.which("gcc-%d" % limit)
+    if not gcc_bin:
+        run("DEBIAN_FRONTEND=noninteractive apt-get update -qq "
+            "&& DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gcc-%d g++-%d"
+            % (limit, limit), timeout=900)
+        gcc_bin = shutil.which("gcc-%d" % limit)
+    if not gcc_bin:
+        return ""
+    gxx_bin = shutil.which("g++-%d" % limit) or gcc_bin.replace("gcc", "g++")
+    iso = "/root/.cybercafe/gcc%d" % limit
+    os.makedirs(iso, exist_ok=True)
+    for src, name in ((gcc_bin, "gcc"), (gxx_bin, "g++"), (gcc_bin, "cc"), (gxx_bin, "c++")):
+        link = os.path.join(iso, name)
+        if not os.path.lexists(link):
+            try:
+                os.symlink(src, link)
+            except OSError:
+                pass
+    return "PATH=%s:$PATH " % iso
+
+def _strata_env():
+    """Strata 子进程完整环境前缀：CUDA toolkit + gcc 兼容隔离"""
+    return _cuda_env() + _gcc_env()
+
 def step_strata_check():
-    """环境预检：驱动 >= 580 / 内存 >= 31GB / 磁盘 >= 80GB / CUDA nvcc 可用"""
+    """环境预检：驱动 >= 580 / 内存 >= 31GB / 磁盘 >= 80GB / CUDA nvcc 可用 / nvcc-宿主gcc 兼容"""
     cfg = ENGINES["strata"]
     rc, out = run("nvidia-smi --query-gpu=driver_version --format=csv,noheader", timeout=30)
     if rc != 0:
@@ -510,6 +562,17 @@ def step_strata_check():
                           "（Ubuntu: sudo apt install nvidia-cuda-toolkit，或从 developer.nvidia.com 装）")
     nvcc_v = re.search(r"release (\d+)\.(\d+)", out)
     nvcc_str = nvcc_v.group(0) if nvcc_v else "版本未知"
+    # nvcc-宿主gcc 兼容预检：CUDA 12.x 只支持宿主 gcc<=12（host_config.h 硬限制）。
+    # 不兼容时自动准备 gcc-<limit> 隔离注入（_gcc_env 会装/软链）；装不上才报错。
+    cuda_major = int(nvcc_v.group(1)) if nvcc_v else 0
+    gcc_limit = CUDA_GCC_LIMIT.get(cuda_major, 13)
+    gcc_prefix = _gcc_env()
+    host_gcc = _host_gcc_major()
+    if host_gcc is not None and host_gcc > gcc_limit and not gcc_prefix:
+        raise DeployError("nvcc %s 与宿主 gcc %d 不兼容（CUDA %d 仅支持 gcc<=%d）。"
+                          "自动安装 gcc-%d 失败，请手动安装: "
+                          "sudo apt install gcc-%d g++-%d，或升级 CUDA Toolkit 13.x"
+                          % (nvcc_str, host_gcc, cuda_major, gcc_limit, gcc_limit, gcc_limit, gcc_limit))
     # 内存
     rc, out = run("awk '/MemTotal/{print $2}' /proc/meminfo", timeout=10)
     mem_gb = (int(out.strip()) if rc == 0 and out.strip() else 0) / 1024 / 1024
@@ -520,7 +583,8 @@ def step_strata_check():
     disk_gb = (int(out.strip()) if rc == 0 and out.strip().isdigit() else 0) / 1024**3
     if disk_gb < cfg["min_disk_gb"]:
         raise DeployError("Strata 模型 ~66GB，要求可用磁盘 >= %sGB，当前 %.1fGB" % (cfg["min_disk_gb"], disk_gb))
-    return "环境预检通过: 驱动 %s / nvcc %s / 内存 %.1fGB / 磁盘 %.1fGB" % (ver, nvcc_str, mem_gb, disk_gb)
+    gcc_note = ("（nvcc 兼容 gcc: gcc-%d 已隔离注入）" % gcc_limit) if gcc_prefix else ""
+    return "环境预检通过: 驱动 %s / nvcc %s / 内存 %.1fGB / 磁盘 %.1fGB%s" % (ver, nvcc_str, mem_gb, disk_gb, gcc_note)
 
 def _strata_installed(cfg):
     """模型数据已就绪判定：run 配置 + 模型数据目录存在。
@@ -547,10 +611,16 @@ def step_strata_setup(progress_cb):
         rc, out = run("git clone --depth 1 %s %s" % (cfg["repo"], d), timeout=900)
         if rc != 0:
             raise DeployError("Strata 仓库克隆失败: " + out[-300:])
+    # 清理上次失败的 CMake 缓存（CMakeCache.txt 会记住旧的 CMAKE_CUDA_COMPILER，
+    # 换了 nvcc/gcc 组合后重跑会复用旧编译配置导致再次失败；t23 真机实测残留）
+    if os.path.exists(os.path.join(d, "build", "CMakeCache.txt")):
+        run("rm -rf %s/build %s/build-vision" % (d, d))
+        progress_cb("strata_setup", "running", "清理上次失败残留的 build 缓存，重新 configure")
     args = " ".join(cfg["setup_args"])
     # HF 权重走 hf-mirror 镜像站（大陆可达）；安装过程可能长达数小时，每 15s 回报进度
-    # CUDA env 注入：setup.sh 内 CMake 需 nvcc 可达（t23 真机：PATH 缺 /usr/local/cuda/bin 导致编译中止）
-    cmd = "cd %s && %sHF_ENDPOINT=https://hf-mirror.com ./setup.sh %s" % (d, _cuda_env(), args)
+    # _strata_env() = CUDA toolkit PATH + LD_LIBRARY_PATH + nvcc-宿主gcc 兼容隔离注入
+    #   （t23：PATH 缺 /usr/local/cuda/bin → CMake 找不到 nvcc；gcc 13.3 与 CUDA 12.2 不兼容 → 需 gcc-12）
+    cmd = "cd %s && %sHF_ENDPOINT=https://hf-mirror.com ./setup.sh %s" % (d, _strata_env(), args)
     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, errors="replace", bufsize=1)
     start_ts = time.time()
@@ -603,10 +673,11 @@ def step_strata_start(model, progress_cb):
         raise DeployError("Strata 未安装，先执行 strata_setup")
     # 直接以 venv python 启动 serve/server.py（config=安装时生成的 strata-coder-iq1_m.json，
     # 端口 11434 = 容器引擎同端口，nginx 网关不变；--open 免开浏览器）。
-    # CUDA env 注入：运行时若需调 nvcc/工具链（t23 复现：systemd PATH 缺 CUDA bin 会导致找不到）
+    # _strata_env() 注入 CUDA toolkit + gcc 兼容隔离（t23：systemd PATH 缺 CUDA bin；
+    # 运行期无编译需求但保持与 setup 一致的工具链环境，避免 nvcc/gcc 相关工具缺失）
     rc, out = run("cd %s && %snohup .venv/bin/python serve/server.py --engine strata "
                   "--config strata-coder-iq1_m.json --port %s > /tmp/strata.log 2>&1 & echo $!"
-                  % (d, _cuda_env(), cfg["port"]), timeout=60)
+                  % (d, _strata_env(), cfg["port"]), timeout=60)
     if rc != 0:
         raise DeployError("Strata 启动失败: " + out[-300:])
     return _wait_openai_ready("strata", model, progress_cb, step="strata_start")
