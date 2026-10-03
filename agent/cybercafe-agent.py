@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -279,6 +279,9 @@ REGISTRY_MIRRORS = ["https://docker.m.daocloud.io", "https://docker.1ms.run",
 # 引擎定义：容器内监听端口统一映射到宿主 127.0.0.1:11434（nginx 网关不变）
 # - vLLM v0.4.1 / SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像，
 #   兼容该机驱动 535.274.02（nvidia-smi CUDA 12.2），HF 权重走 hf-mirror
+# - strata = Strata 专用运行时（Niko1221/Strata）：原生进程（非容器），
+#   仅 Qwen3.8-Flash-Next Coder 档（IQ1_M），驱动>=580 / 内存>=31GB / 磁盘>=80GB，
+#   low-RAM resident 模式，单并发；serve/server.py 监听 127.0.0.1:11434（与容器引擎同端口）
 ENGINES = {
     "ollama": {
         "image": "ollama/ollama:latest",
@@ -303,6 +306,21 @@ ENGINES = {
         "args": ["python3", "-m", "sglang.launch_server",
                  "--model-path", "{model}", "--host", "0.0.0.0", "--port", "30000",
                  "--quantization", "awq"],
+    },
+    "strata": {
+        "native": True,                      # 非容器：原生进程（git clone + setup.sh + run 脚本）
+        "repo": "https://github.com/Niko1221/Strata.git",
+        "dir": "/opt/strata",                # COW 快照机重启会丢，需重装/重拉（见 strata_setup）
+        "run": "run-coder-iq1_m.sh",         # setup.sh --no-start 后生成的启动脚本
+        "port": "11434",                     # serve/server.py 监听 127.0.0.1:11434
+        "family": "coder",                   # 模型档（Coder = Qwen3.8-Flash-Next Coder，IQ1_M）
+        "quant": "IQ1_M",
+        "min_driver": 580.0,                 # MIN_DRIVER = 580（CUDA 13.0）
+        "min_ram_gb": 31.0,
+        "min_disk_gb": 80.0,
+        "setup_args": ["--family", "coder", "--model", "IQ1_M", "--context", "32768",
+                       "--vision", "no", "--port", "11434", "--host", "127.0.0.1",
+                       "--low-ram", "resident", "--yes", "--no-start"],
     },
 }
 
@@ -362,12 +380,19 @@ def step_gpu_toolkit():
     return "nvidia-container-toolkit 安装完成"
 
 def step_pull_images(engine):
-    images = [ENGINES[engine]["image"], "nginx:alpine", "cloudflare/cloudflared:latest"]
+    # strata 为原生进程：无引擎容器镜像，仅拉网关/隧道镜像
+    images = ["nginx:alpine", "cloudflare/cloudflared:latest"]
+    if not ENGINES[engine].get("native"):
+        images = [ENGINES[engine]["image"]] + images
     for img in images:
         rc, out = run("docker pull %s" % img, timeout=1800)
         if rc != 0:
             raise DeployError("拉取镜像失败 %s: %s" % (img, out[-300:]))
     return "镜像就绪: " + ", ".join(images)
+
+def _kill_strata():
+    """停掉 strata 原生 server 进程（serve/server.py，含 --open 浏览器进程不涉及）"""
+    run("pkill -f 'serve/server.py' ; true")
 
 def _engine_running(container):
     rc, out = run("docker ps --filter name=^/%s$ --filter status=running -q" % container)
@@ -381,10 +406,13 @@ def step_engine_start(engine, model, progress_cb):
     """
     cfg = ENGINES[engine]
     container = cfg["container"]
-    # 引擎切换/重建：先清掉其它引擎容器，避免 11434 端口占用
+    # 引擎切换/重建：先清掉其它引擎容器（strata 为原生进程用 pkill），避免 11434 端口占用
     for name, c in ENGINES.items():
         if name != engine:
-            run("docker rm -f %s" % c["container"])
+            if c.get("native"):
+                _kill_strata()
+            else:
+                run("docker rm -f %s" % c["container"])
     if _engine_running(container):
         return "%s 已在运行" % engine
     run("docker rm -f %s" % container)
@@ -413,18 +441,134 @@ def _wait_ollama_ready():
         time.sleep(2)
     raise DeployError("ollama 健康检查超时")
 
-def _wait_openai_ready(engine, model, progress_cb):
+def _wait_openai_ready(engine, model, progress_cb, step="engine_start"):
     last_ts = time.time()
-    for i in range(240):  # 最长约 60 分钟（含首次 HF 权重下载）
+    for i in range(240):  # 最长约 60 分钟（含首次 HF 权重下载 / Strata 冷加载 125B MoE）
         rc, out = run("curl -s -m 10 http://127.0.0.1:11434/v1/models", timeout=15)
         if rc == 0 and out.strip() and '"id"' in out:
             return "%s 运行中: %s" % (engine, out.strip()[:200])
         if time.time() - last_ts >= DEPLOY_HEARTBEAT_INTERVAL:
             last_ts = time.time()
-            progress_cb("engine_start", "running",
+            progress_cb(step, "running",
                         "%s 启动中（下载/加载权重，已等待 %ds）..." % (engine, i * 15))
         time.sleep(15)
     raise DeployError("%s 健康检查超时（60 分钟）" % engine)
+
+# ---------------------------------------------------------------- Strata 引擎（原生进程，非容器）
+# 约束（t21 调研 docs/strata-feasibility.md）：驱动>=580（MIN_DRIVER）、内存>=31GB（Coder IQ1_M tight）、
+# 磁盘>=80GB（~66GB 下载）；low-RAM resident 模式自动容纳；单并发。COW 快照机重启丢数据，需重装/重拉。
+
+def step_strata_check():
+    """环境预检：驱动 >= 580 / 内存 >= 31GB / 磁盘 >= 80GB"""
+    cfg = ENGINES["strata"]
+    rc, out = run("nvidia-smi --query-gpu=driver_version --format=csv,noheader", timeout=30)
+    if rc != 0:
+        raise DeployError("nvidia-smi 不可用: " + out.strip()[:200])
+    ver = (out.strip().splitlines() or [""])[0].strip()
+    try:
+        ver_f = float(ver)
+    except ValueError:
+        raise DeployError("无法解析驱动版本: %s" % ver)
+    if ver_f < cfg["min_driver"]:
+        raise DeployError("Strata 要求驱动 >= %s（MIN_DRIVER 580/CUDA 13.0），当前 %s" % (cfg["min_driver"], ver))
+    # 内存
+    rc, out = run("awk '/MemTotal/{print $2}' /proc/meminfo", timeout=10)
+    mem_gb = (int(out.strip()) if rc == 0 and out.strip() else 0) / 1024 / 1024
+    if mem_gb < cfg["min_ram_gb"]:
+        raise DeployError("Strata Coder 档要求内存 >= %sGB（low-RAM resident），当前 %.1fGB" % (cfg["min_ram_gb"], mem_gb))
+    # 磁盘（根分区可用）
+    rc, out = run("df -B1 --output=avail / | tail -1", timeout=10)
+    disk_gb = (int(out.strip()) if rc == 0 and out.strip().isdigit() else 0) / 1024**3
+    if disk_gb < cfg["min_disk_gb"]:
+        raise DeployError("Strata 模型 ~66GB，要求可用磁盘 >= %sGB，当前 %.1fGB" % (cfg["min_disk_gb"], disk_gb))
+    return "环境预检通过: 驱动 %s / 内存 %.1fGB / 磁盘 %.1fGB" % (ver, mem_gb, disk_gb)
+
+def _strata_installed(cfg):
+    """模型数据已就绪判定：run 配置 + 模型数据目录存在。
+    数据默认放安装目录旁（ROOT.parent/Strata-data，t21 调研），COW 重启丢数据后需重跑 setup"""
+    d = cfg["dir"]
+    config_ok = (os.path.exists(os.path.join(d, "strata-coder-iq1_m.json"))
+                 or os.path.exists(os.path.join(d, cfg["run"])))
+    data_ok = (os.path.isdir(os.path.join(d, "Strata-data"))
+               or os.path.isdir(os.path.join(os.path.dirname(d), "Strata-data")))
+    return config_ok and data_ok
+
+def step_strata_setup(progress_cb):
+    """克隆 Strata + 安装 Coder 模型（~66GB 下载，含缓存/重拉逻辑；COW 重启需重装）"""
+    cfg = ENGINES["strata"]
+    d = cfg["dir"]
+    if _strata_installed(cfg):
+        return "模型已就绪（缓存命中）: " + d
+    # Strata 安装需 git（install.sh 只装 python3/curl，这里补装）
+    if not shutil.which("git"):
+        rc, out = run("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git", timeout=600)
+        if rc != 0:
+            raise DeployError("git 安装失败: " + out[-300:])
+    if not os.path.isdir(d):
+        rc, out = run("git clone --depth 1 %s %s" % (cfg["repo"], d), timeout=900)
+        if rc != 0:
+            raise DeployError("Strata 仓库克隆失败: " + out[-300:])
+    args = " ".join(cfg["setup_args"])
+    # HF 权重走 hf-mirror 镜像站（大陆可达）；安装过程可能长达数小时，每 15s 回报进度
+    cmd = "cd %s && HF_ENDPOINT=https://hf-mirror.com ./setup.sh %s" % (d, args)
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, errors="replace", bufsize=1)
+    start_ts = time.time()
+    buf, tail, last_ts, last_pct = "", [], start_ts, -1
+    while True:
+        ch = p.stdout.read(1)
+        if not ch and p.poll() is not None:
+            break
+        if not ch:
+            continue
+        buf += ch
+        if ch in ("\n", "\r"):
+            line = buf.strip()
+            buf = ""
+            if not line:
+                continue
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", line)
+            if m and "Downloading" in line:
+                pct = int(float(m.group(1)))
+                if pct != last_pct and time.time() - last_ts > DEPLOY_HEARTBEAT_INTERVAL:
+                    last_pct, last_ts = pct, time.time()
+                    progress_cb("strata_setup", "running", "下载模型 %d%%（~66GB，含 MTP/视觉，已用 %ds）..."
+                                % (pct, int(time.time() - start_ts)))
+            elif time.time() - last_ts > DEPLOY_HEARTBEAT_INTERVAL:
+                last_ts = time.time()
+                progress_cb("strata_setup", "running",
+                            "安装中（%ds）: %s" % (int(time.time() - start_ts), line[:120]))
+            tail.append(line)
+            tail = tail[-5:]
+    rc = p.wait()
+    if rc != 0:
+        raise DeployError("Strata 安装失败: %s" % (" | ".join(tail)[-300:] or "无输出"))
+    if not _strata_installed(cfg):
+        raise DeployError("Strata 安装结束但模型数据缺失: " + " | ".join(tail)[-300:])
+    return "Strata 安装完成（模型 ~66GB 已就位）"
+
+def step_strata_start(model, progress_cb):
+    """启动 Strata server（low-RAM resident 自动），统一暴露 OpenAI 兼容 API 到 127.0.0.1:11434"""
+    cfg = ENGINES["strata"]
+    d = cfg["dir"]
+    # 引擎切换：先清掉其它引擎容器 + 残留 strata 进程，避免 11434 端口占用
+    for name, c in ENGINES.items():
+        if name != "strata":
+            if c.get("native"):
+                _kill_strata()
+            else:
+                run("docker rm -f %s" % c["container"])
+    _kill_strata()
+    if not _strata_installed(cfg):
+        raise DeployError("Strata 未安装，先执行 strata_setup")
+    # 直接以 venv python 启动 serve/server.py（config=安装时生成的 strata-coder-iq1_m.json，
+    # 端口 11434 = 容器引擎同端口，nginx 网关不变；--open 免开浏览器）
+    rc, out = run("cd %s && nohup .venv/bin/python serve/server.py --engine strata "
+                  "--config strata-coder-iq1_m.json --port %s > /tmp/strata.log 2>&1 & echo $!"
+                  % (d, cfg["port"]), timeout=60)
+    if rc != 0:
+        raise DeployError("Strata 启动失败: " + out[-300:])
+    return _wait_openai_ready("strata", model, progress_cb, step="strata_start")
 
 def step_model_pull(model, progress_cb):
     """流式拉取模型并回报百分比；失败时带上输出尾部便于诊断"""
@@ -543,17 +687,25 @@ def deploy(cmd, progress_cb):
         raise DeployError("指令缺少 api_key")
     if not model:
         raise DeployError("指令缺少 model")
-    # 环境步（gpu_check/docker/mirrors/gpu_toolkit）三引擎共用；引擎步按 engine 分支
+    # 环境步（gpu_check/docker/mirrors/gpu_toolkit）四引擎共用；引擎步按 engine 分支
     steps = [
         ("gpu_check",     "检测 GPU",        step_gpu_check),
         ("docker",        "安装/检查 Docker", step_docker),
         ("mirrors",       "配置镜像加速",      step_mirrors),
         ("gpu_toolkit",   "GPU 容器支持",     step_gpu_toolkit),
         ("pull_images",   "拉取容器镜像",      None),
-        ("engine_start",  "启动推理引擎",      None),
     ]
-    if engine == "ollama":
-        steps.append(("model_pull", "拉取模型 " + model, None))
+    if engine == "strata":
+        # Strata 为原生进程（非容器）：环境预检 + 安装/拉模型 + 启动，无 ollama 式 model_pull
+        steps += [
+            ("strata_check", "Strata 环境预检", None),
+            ("strata_setup", "安装 Strata + 拉模型", None),
+            ("strata_start", "启动 Strata", None),
+        ]
+    else:
+        steps.append(("engine_start", "启动推理引擎", None))
+        if engine == "ollama":
+            steps.append(("model_pull", "拉取模型 " + model, None))
     steps += [
         ("gateway",       "部署鉴权网关",      None),
         ("tunnel",        "建立公网隧道",      None),
@@ -569,6 +721,12 @@ def deploy(cmd, progress_cb):
                 detail = step_engine_start(engine, model, progress_cb)
             elif step_id == "model_pull":
                 detail = step_model_pull(model, progress_cb)
+            elif step_id == "strata_check":
+                detail = step_strata_check()
+            elif step_id == "strata_setup":
+                detail = step_strata_setup(progress_cb)
+            elif step_id == "strata_start":
+                detail = step_strata_start(model, progress_cb)
             elif step_id == "gateway":
                 detail = step_gateway(api_key)
             elif step_id == "tunnel":
@@ -590,9 +748,15 @@ def deploy(cmd, progress_cb):
 # ---------------------------------------------------------------- 其他指令
 
 def cmd_stop():
-    run("docker rm -f cloudflared chatgw %s" % " ".join(e["container"] for e in ENGINES.values()))
+    # 停全部引擎（容器 + strata 原生进程）+ 网关/隧道
+    for e in ENGINES.values():
+        if e.get("native"):
+            _kill_strata()
+        else:
+            run("docker rm -f %s" % e["container"])
+    run("docker rm -f cloudflared chatgw")
     heartbeat({"deploy": {"state": "stopped", "ts": int(time.time())}})
-    return "已停止 %s/chatgw/cloudflared 容器" % "/".join(ENGINES.keys())
+    return "已停止 %s/chatgw/cloudflared" % "/".join(ENGINES.keys())
 
 def cmd_restart_tunnel():
     run("docker rm -f cloudflared")

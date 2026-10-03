@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/aliyun/Dockerfile
-    image: cybercafe-cloud:0.3.3
+    image: cybercafe-cloud:0.3.5
     environment:
       - ADMIN_TOKEN=${ADMIN_TOKEN:?missing}
       # 网络回退通道：aliyun 出口访问 raw.githubusercontent.com 超时，默认 jsDelivr 镜像；

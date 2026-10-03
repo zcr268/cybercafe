@@ -23,10 +23,13 @@ let lastNetworkOk = null; // "raw" | "jsdelivr"
 // 引擎 × 模型 目录：UI 引擎下拉 + 模型级联下拉的源数据；部署指令携带 engine 字段
 // - ollama 走 Ollama 仓库 tag；vllm/sglang 走 HuggingFace 模型 id（HF_ENDPOINT=hf-mirror 拉权重）
 // - vLLM 镜像 v0.4.1 / SGLang v0.4.1.post4-cu121 为 CUDA 12.1 基底，兼容该机驱动 535.274.02（CUDA 12.2）
+// - strata = Strata 专用运行时（Niko1221/Strata，仅 Qwen3.8-Flash-Next Coder 档 IQ1_M，
+//   驱动≥580 / 内存≥31GB / 磁盘≥80GB，low-RAM resident，单并发），OpenAI 兼容 API 亦走 127.0.0.1:11434
 const ENGINES = {
   ollama: ["qwen2.5:7b-instruct", "qwen2.5:14b-instruct-q4_k_m", "llama3.1:8b"],
   vllm: ["Qwen/Qwen2-7B-Instruct-AWQ", "Qwen/Qwen2-1.5B-Instruct-AWQ"],
   sglang: ["Qwen/Qwen2.5-7B-Instruct-AWQ", "Qwen/Qwen2.5-14B-Instruct-AWQ"],
+  strata: ["Qwen3.8-Flash-Next-Coder"],
 };
 const MODELS = Object.values(ENGINES).flat();
 

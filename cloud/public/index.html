@@ -40,6 +40,7 @@
   .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.5; }
   .msg.user { background: #2563eb; margin-left: auto; }
   .msg.bot { background: #334155; }
+  .msg .perf { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #475569; font-size: 11px; color: #94a3b8; font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
   .chatin { display: flex; gap: 8px; margin-top: 10px; }
   .chatin input { flex: 1; }
   .toast { position: fixed; top: 14px; right: 14px; background: #065f46; padding: 10px 14px; border-radius: 8px; display: none; z-index: 9; font-size: 13px; max-width: 60vw; word-break: break-all; }
@@ -321,15 +322,16 @@ function usageBars(u) {
        + barHtml(`内存 ${u.mem_used_gb ?? "-"}/${u.mem_total_gb ?? "-"}G ${u.mem_pct ?? "-"}%`, u.mem_pct)
        + (u.gpu_util_pct != null ? barHtml(`GPU ${u.gpu_util_pct}% ${gpuMem}`, u.gpu_util_pct) : "");
 }
-// 部署节点 → 总进度权重（model_pull/engine_start 占 50~90；vllm/sglang 引擎步含权重下载）
+// 部署节点 → 总进度权重（model_pull/engine_start/strata_setup 占 50~90；vllm/sglang 引擎步含权重下载）
 const STEP_W = { gpu_check: 5, docker: 10, mirrors: 15, gpu_toolkit: 25, pull_images: 40,
-                 engine_start: 50, model_pull: 90, gateway: 94, tunnel: 97, verify: 100 };
+                 engine_start: 50, model_pull: 90, strata_check: 30, strata_setup: 50, strata_start: 90,
+                 gateway: 94, tunnel: 97, verify: 100 };
 function deployPct(dep) {
   if (!dep || !dep.state) return 0;
   if (dep.state === "online") return 100;
   if (dep.state === "queued") return 2;
   if (dep.state === "idle" || dep.state === "stopped") return 0;
-  if (dep.step === "model_pull" || dep.step === "engine_start") {
+  if (dep.step === "model_pull" || dep.step === "engine_start" || dep.step === "strata_setup") {
     // vllm/sglang 没有独立 model_pull：engine_start 即含权重下载，直接给 90 档
     if (dep.step === "engine_start" && dep.engine && dep.engine !== "ollama") return 90;
     const m = /(\d+)\s*%/.exec(dep.detail || "");
@@ -356,6 +358,35 @@ function addMsg(role, text) {
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
   return d;
 }
+// 聊天性能实测（四引擎通用，SSE 流式统一口径）：
+// - TTFT 首字延迟 = 请求发出 → 首个含 content 的 SSE chunk 到达（毫秒）
+// - tok/s = 累计 tokens ÷ 生成耗时（首字到达 → 末字到达），流式统计
+// - token 数优先取 SSE 末块 usage.completion_tokens（vllm/sglang/ollama 均支持
+//   stream_options.include_usage；strata 为 OpenAI 兼容实现同协议），缺失时按
+//   CJK 每字≈1 token + 其余按 4 字符≈1 token 估算（统一口径，避免按 chunk 数偏差）
+function estTokens(s) {
+  if (!s) return 0;
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+  const rest = s.replace(/[\u4e00-\u9fff]/g, " ").replace(/\s+/g, " ").trim();
+  return cjk + (rest ? Math.max(1, Math.round(rest.length / 4)) : 0);
+}
+let chatPerfLast = null;                 // 上次测量值（跨设备保留，用于「上次」对照）
+let chatPerfCum = { msgs: 0, toks: 0 };  // 累计值
+function perfLine(bot, j) {
+  const tok = (j.usage && j.usage.completion_tokens != null)
+    ? j.usage.completion_tokens : estTokens(j.content || "");
+  const tps = j.genMs > 0 ? tok / (j.genMs / 1000) : 0;
+  const line = document.createElement("div");
+  line.className = "perf";
+  line.textContent = `⏱ TTFT ${j.ttft}ms · ${tps.toFixed(1)} tok/s · ${tok} tok`
+    + (chatPerfLast ? `（上次 ${chatPerfLast.ttft}ms · ${chatPerfLast.tps.toFixed(1)} tok/s）` : "")
+    + ` · 累计 ${chatPerfCum.toks + tok} tok`;
+  bot.appendChild(line);
+  chatPerfLast = { ttft: j.ttft, tps, tok };
+  chatPerfCum.msgs += 1;
+  chatPerfCum.toks += tok;
+  $("chatbox").scrollTop = $("chatbox").scrollHeight;
+}
 async function send() {
   const id = $("chatDev").value;
   const d = devices.find(x => x.device_id === id);
@@ -365,26 +396,79 @@ async function send() {
   if (!turl) { toast("该设备没有可用隧道地址", false); return; }
   $("chatIn").value = "";
   addMsg("user", text);
-  const thinking = addMsg("bot", "…");
+  const bot = addMsg("bot", "…");
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 120000); // 长生成超时保护（首次推理可能较慢）
+  const t0 = performance.now();
+  const timer = setTimeout(() => ctrl.abort(), 300000); // 长生成超时保护（strata 冷启动/长文放宽到 5min）
+  let firstTokAt = null, lastTokAt = null, content = "", usage = null;
   try {
     const r = await fetch(turl + "/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json",
                  "Authorization": "Bearer " + (d.deploy.model_api_key || "") },
-      body: JSON.stringify({ model: d.deploy.model, messages: [{ role: "user", content: text }] }),
+      body: JSON.stringify({
+        model: d.deploy.model,
+        messages: [{ role: "user", content: text }],
+        stream: true,
+        stream_options: { include_usage: true },   // 让 vllm/sglang/ollama 在末块带 usage；strata 同协议
+      }),
       signal: ctrl.signal,
     });
-    const raw = await r.text();
-    let j = {};
-    try { j = raw ? JSON.parse(raw) : {}; }
-    catch { throw new Error("HTTP " + r.status + "，响应非 JSON: " + raw.slice(0, 200)); }
-    if (!r.ok) throw new Error("HTTP " + r.status + " " + (j.error && j.error.message || "(空响应)"));
-    if (!j.choices || !j.choices[0]) throw new Error("HTTP " + r.status + " 响应格式异常: " + raw.slice(0, 200));
-    thinking.textContent = j.choices[0].message.content;
+    const ct = r.headers.get("content-type") || "";
+    if (!r.ok || !r.body || !ct.includes("text/event-stream")) {
+      // 非流式回退（引擎不支持 SSE 时）：一次性 JSON，TTFT 即整体耗时
+      const raw = await r.text();
+      let j = {};
+      try { j = raw ? JSON.parse(raw) : {}; }
+      catch { throw new Error("HTTP " + r.status + "，响应非 JSON: " + raw.slice(0, 200)); }
+      if (!r.ok) throw new Error("HTTP " + r.status + " " + (j.error && j.error.message || "(空响应)"));
+      if (!j.choices || !j.choices[0]) throw new Error("HTTP " + r.status + " 响应格式异常: " + raw.slice(0, 200));
+      content = j.choices[0].message.content || "";
+      firstTokAt = lastTokAt = performance.now();
+      usage = j.usage || null;
+      bot.textContent = content;
+    } else {
+      // SSE 流解析（统一口径）：按 data: 行解析，首个含 content 的 delta 记为首字
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, idx).replace(/\r$/, "");
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let j = {};
+          try { j = JSON.parse(payload); } catch { continue; }
+          const delta = j.choices && j.choices[0] && j.choices[0].delta;
+          const piece = delta && delta.content ? delta.content : "";
+          const now = performance.now();
+          if (piece) {
+            if (firstTokAt === null) firstTokAt = now;
+            lastTokAt = now;
+            content += piece;
+            bot.textContent = content;
+          }
+          if (j.usage && j.usage.completion_tokens != null) usage = j.usage;
+        }
+      }
+    }
+    if (firstTokAt === null) throw new Error("流式响应无任何内容 token");
+    const j = {
+      ttft: Math.max(1, Math.round(firstTokAt - t0)),   // 请求发出 → 首个 token chunk
+      genMs: Math.max(1, lastTokAt - firstTokAt),       // 生成耗时（首→末）
+      content,
+      usage,
+    };
+    bot.textContent = content;
+    perfLine(bot, j);
   } catch (e) {
-    thinking.textContent = "❌ " + (e.name === "AbortError" ? "请求超时（120s），请确认设备在线且隧道存活" : e.message);
+    bot.textContent = "❌ " + (e.name === "AbortError" ? "请求超时（300s），请确认设备在线且隧道存活" : e.message);
   } finally {
     clearTimeout(timer);
   }

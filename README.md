@@ -70,17 +70,30 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 - KV key 约定：`batch:<code>`（label/quota/used/created/expires）、`prov:machine:<machine_id>`（key 映射）、`devicekey:<hash>`（沿用，新增 batch/machine_id 字段）。
 - 完整真机验收（打镜像→开实例→首启自动注册→配额/无限）由测试成员按 t9 执行。
 
-## 推理引擎（v0.3.0 起支持三引擎）
+## 推理引擎（v0.3.5 起支持四引擎）
 
 | 引擎 | 镜像 | 模型（HF id / Ollama tag） | 说明 |
 |---|---|---|---|
 | `ollama` | `ollama/ollama:latest` | `qwen2.5:7b-instruct`、`qwen2.5:14b-instruct-q4_k_m`、`llama3.1:8b` | 默认引擎，`ollama pull` 拉模型 |
 | `vllm` | `vllm/vllm-openai:v0.4.1`（CUDA 12.1 基底） | `Qwen/Qwen2-7B-Instruct-AWQ`、`Qwen/Qwen2-1.5B-Instruct-AWQ` | OpenAI 兼容 API 端口 8000→宿主 11434；HF 权重走 `HF_ENDPOINT=https://hf-mirror.com` |
 | `sglang` | `lmsysorg/sglang:v0.4.1.post4-cu121`（CUDA 12.1 基底） | `Qwen/Qwen2.5-7B-Instruct-AWQ`、`Qwen/Qwen2.5-14B-Instruct-AWQ` | OpenAI 兼容 API 端口 30000→宿主 11434；HF 权重走 hf-mirror |
+| `strata` | 原生进程（非容器，Niko1221/Strata） | `Qwen3.8-Flash-Next-Coder`（Coder 档 IQ1_M，~66GB） | 专用运行时（125B MoE 压进 16GB 显存），`git clone + setup.sh` 安装，`serve/server.py` 监听 127.0.0.1:11434；驱动≥580 / 内存≥31GB / 磁盘≥80GB 预检，low-RAM resident 模式，单并发 |
 
-- 三引擎统一以 OpenAI 兼容 API 暴露在 `127.0.0.1:11434`（nginx 鉴权网关不变），UI 聊天面板按设备当前引擎/模型发请求。
-- 镜像选择兼容该机驱动 535.274.02（nvidia-smi CUDA 12.2）：vLLM v0.4.1 与 SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像。
-- `stop` 指令会停止全部引擎容器（ollama/vllm/sglang）+ 网关 + 隧道。
+- 四引擎统一以 OpenAI 兼容 API 暴露在 `127.0.0.1:11434`（nginx 鉴权网关不变），UI 聊天面板按设备当前引擎/模型发请求。
+- 镜像选择兼容该机驱动 535.274.02（nvidia-smi CUDA 12.2）：vLLM v0.4.1 与 SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像；Strata 要求驱动 ≥580（CUDA 13.0，t21 调研该机已升 580.178.04）。
+- Strata 注意事项：COW 快照机重启丢数据，agent 部署时自动重装/重拉 ~66GB（支持缓存命中跳过下载，HF 权重走 hf-mirror）；模型数据默认放安装目录旁 `Strata-data`。
+- `stop` 指令会停止全部引擎（ollama/vllm/sglang 容器 + strata 进程）+ 网关 + 隧道。
+
+## 聊天性能实测（v0.3.5 起）
+
+聊天面板流式聊天时在每条回复块内实时显示：
+
+- **TTFT 首字延迟**：请求发出 → 首个含 content 的 SSE chunk 到达（毫秒）；
+- **每秒 tokens**：累计生成 tokens ÷ 生成耗时（首字→末字，流式统计）；
+- token 数优先取 SSE 末块 `usage.completion_tokens`（`stream_options.include_usage`，vllm/sglang/ollama 支持、strata 同协议），缺失时按统一口径估算（CJK 每字≈1 token + 其余 4 字符≈1 token）；
+- 同时显示「上次」测量与「累计」tokens（跨设备保留）。
+
+四引擎通用（SSE 流解析统一口径）；引擎不支持 SSE 时自动回退一次性 JSON（TTFT 即整体耗时）。
 
 ## 安全模型
 
