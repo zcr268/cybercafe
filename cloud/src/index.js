@@ -695,6 +695,7 @@ const INSTALL_EXTRA_ALLOW = {
   "install.sh": "agent",
   "provision.sh": "agent",
   "cybercafe-provision.service": "agent",
+  "cybercafe-deploy.py": "agent",
   "uninstall-all.sh": "root",
 };
 
