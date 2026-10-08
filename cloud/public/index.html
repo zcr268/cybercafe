@@ -397,7 +397,8 @@ function renderDevices() {
       return seg ? esc(seg) : "";
     }).filter(Boolean).join("<br>");
     const extIp = d.remote_ip ? `外网 ${esc(d.remote_ip)}` : "";
-    const hw = [hwBase, netRows, extIp].filter(Boolean).join("<br>");
+    const hwSrc = d.hw_source ? `指纹来源 ${esc(d.hw_source)}` : "";
+    const hw = [hwBase, netRows, extIp, hwSrc].filter(Boolean).join("<br>");
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
     const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
