@@ -70,8 +70,8 @@ fi
 # CUDA toolkit 预检 + nvcc/gcc 兼容（t23 教训：CUDA 12.x 只支持宿主 gcc<=12，
 # 目标机 Ubuntu 24.04 默认 gcc 13.3 → 需 gcc-12 隔离注入，否则 CMake enable_language(CUDA) 失败）
 CUDA_ENV=""
-if [ -x /usr/local/cuda/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH";
-elif [ -x /usr/local/cuda-12.2/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda-12.2/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH";
+if [ -x /usr/local/cuda/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}";
+elif [ -x /usr/local/cuda-12.2/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda-12.2/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:${LD_LIBRARY_PATH:-}";
 fi
 [ -n "$CUDA_ENV" ] || die "未找到 CUDA toolkit（/usr/local/cuda*）——需先装 CUDA 12.x/13.x（sudo apt install nvidia-cuda-toolkit 或 developer.nvidia.com）"
 
@@ -93,7 +93,13 @@ fi
 # ------------------------- 2. 克隆并编译 stable-diffusion.cpp -------------------------
 say "=== 编译 stable-diffusion.cpp（CUDA 版，约 10-20 分钟）==="
 if [ ! -d "$SDCPP_DIR/.git" ]; then
-  git clone --depth 1 https://github.com/leejet/stable-diffusion.cpp "$SDCPP_DIR"
+  # --recursive 必需：sd.cpp 依赖 ggml 子模块，缺了 CMake 会报 ggml 无 CMakeLists（t25 真机实测）
+  git clone --depth 1 --recursive https://github.com/leejet/stable-diffusion.cpp "$SDCPP_DIR"
+else
+  # 已有 clone 但子模块缺失/残留失败 build（换编译器组合后旧 CMakeCache 会复用错误配置）
+  cd "$SDCPP_DIR"
+  git submodule update --init --recursive 2>/dev/null || true
+  rm -rf build build-vision 2>/dev/null || true
 fi
 cd "$SDCPP_DIR"
 mkdir -p build && cd build
