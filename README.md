@@ -204,3 +204,8 @@ chmod +x /root/uninstall-all.sh
 2. **最终收敛**：每轮改动的最终产物必须收敛到 **GitHub 仓库（zcr268/cybercafe）** 与 **aliyun**（`ssh aliyun`，`~/work/cybercafe`，deploy/aliyun 可部署形态）。本地修改推回前先 `git pull --rebase` 防冲突，并同步部署到 aliyun。
 3. **真实路径红线**：开发与验收的端到端验证必须走真实路径（真实机器 / 真实容器 / 真实网络传输），禁止 mock 冒充。
 4. **本地仓库目录纪律**：不随手改动本地已有目录文件；涉及阿里云侧修复直接在 aliyun 上改并提交，开发用独立克隆（如 /tmp/cybercafe-*）。
+
+## MiniMax-H3 本地部署（minimax-h3/）
+
+MiniMax-H3（视频+音频生成引擎，非聊天模型）的规格核实、一键安装/卸载脚本与真机运行证据见
+[`minimax-h3/README.md`](minimax-h3/README.md)（含 GPU 放置语义说明、档位表与卸载说明）。
