@@ -11,12 +11,16 @@ services:
       - GITHUB_RAW_BASE=${GITHUB_RAW_BASE:-https://cdn.jsdelivr.net/gh/zcr268/cybercafe@main/agent}
       # loopback 取自身静态资源（public/_agent 挂载了仓库 agent/）——git pull 后即时生效
       - AGENT_LOCAL_BASE=http://127.0.0.1:8080/_agent
+      # 根目录文件（uninstall-all.sh 等）本地通道：仓库根只读挂载到 public/_repo
+      - AGENT_LOCAL_ROOT_BASE=http://127.0.0.1:8080/_repo
     volumes:
       - cybercafe-state:/data        # wrangler 本地 KV/Cache 持久化
       # 实时提供 agent/ 文件（install.sh / cybercafe-agent.py）：dev server 每请求读盘，
       # 不受 raw/jsDelivr 任何 CDN 缓存影响；只读挂载，不改动宿主机仓库
       # 注意：相对路径以 compose 文件（deploy/aliyun/）为基准，仓库根在 ../../ 两层之上
       - ../../agent:/app/cloud/public/_agent:ro
+      # 仓库根目录（uninstall-all.sh 等根级工具）本地通道；仓库为公开仓库，暴露等价于 GitHub 公网
+      - ../../:/app/cloud/public/_repo:ro
     ports:
       - "127.0.0.1:8080:8080"        # 只对本机暴露，由 cloudflared 出公网
     restart: unless-stopped

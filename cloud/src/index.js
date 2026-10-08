@@ -130,6 +130,44 @@ async function fetchRepoFileWithChannel(env, name) {
   }
 }
 
+// t41：仓库根目录文件通道（uninstall-all.sh 等位于 agent/ 之外）。
+// 网络基座 = agent 通道基座去掉尾部 /agent（仓库根）；本地基座 AGENT_LOCAL_ROOT_BASE
+// （compose 把仓库根只读挂载到 public/_repo）；与 fetchRepoFile 同构的自适应回退。
+async function fetchRepoFileRoot(env, name) {
+  if (env.AGENT_LOCAL_ROOT_BASE) {
+    try {
+      const resp = await fetch(`${env.AGENT_LOCAL_ROOT_BASE.replace(/\/$/, "")}/${name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      // 本地静态通道对缺失文件可能回吐 worker 兜底文本（200）：按内容特征识别并降级网络通道
+      if (text === "cybercafe cloud (no assets bound)" || text.length < 64) throw new Error("local asset placeholder");
+      return text;
+    } catch (e) { /* 本地失败 → 网络兜底 */ }
+  }
+  const rootRaw = rawBase(env).replace(/\/agent\/?$/, "").replace(/\/$/, "");
+  const rootJsd = jsdelivrBase(env).replace(/\/agent\/?$/, "").replace(/\/$/, "");
+  const raw = `${rootRaw}/${name}`;
+  const jsd = `${rootJsd}/${name}`;
+  const firstUrl = lastNetworkOk === "jsdelivr" ? jsd : raw;
+  const secondUrl = firstUrl === jsd ? raw : jsd;
+  const label = firstUrl === jsd ? "jsdelivr" : "raw";
+  try {
+    const resp = await fetch(firstUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    lastNetworkOk = label;
+    return await resp.text();
+  } catch (e1) {
+    try {
+      const resp = await fetch(secondUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      lastNetworkOk = secondUrl === jsd ? "jsdelivr" : "raw";
+      return await resp.text();
+    } catch (e2) {
+      throw new Error(`fetch root ${name} failed (${label}: ${e1.message}; fallback: ${e2.message})`);
+    }
+  }
+}
+
 // 经 cloudflared 等反代时 url.protocol 是 http，用 X-Forwarded-Proto 还原真实协议
 function publicOrigin(request, url) {
   const proto = request.headers.get("X-Forwarded-Proto") || url.protocol.replace(":", "");
@@ -660,7 +698,15 @@ async function handleAdminDeleteDevice(env, id) {
 
 // 无 key 文件下发白名单（?batch= 一键装机命令场景：install.sh 原始脚本公开下发，
 // 批次模式自行领取 cck- key；provision.sh/service 供镜像预置/自包含命令取用）
-const INSTALL_EXTRA_ALLOW = new Set(["install.sh", "provision.sh", "cybercafe-provision.service"]);
+// 白名单：name → 文件所在作用域（agent=agent/ 目录，走既有 fetchRepoFile 通道；
+// root=仓库根目录，走 fetchRepoFileRoot 通道）。仅精确名单可下发，杜绝路径穿越/越权读取。
+const INSTALL_EXTRA_ALLOW = {
+  "install.sh": "agent",
+  "provision.sh": "agent",
+  "cybercafe-provision.service": "agent",
+  "cybercafe-deploy.py": "agent",
+  "uninstall-all.sh": "root",
+};
 
 async function handleInstallSh(request, env, url) {
   // ?key=<设备KEY>      → 单机安装：校验设备 key，注入 API_BASE/DEVICE_KEY
@@ -683,11 +729,13 @@ async function handleInstallSh(request, env, url) {
 }
 
 async function handleInstallExtra(env, url) {
-  // 白名单内部文件下发（镜像预置/一键装机命令在裸环境取配套文件；agent/ 文件本身公开）
+  // 白名单内部文件下发（镜像预置/一键装机命令在裸环境取配套文件；仓库文件本身公开）。
+  // agent/ 文件走既有 fetchRepoFile；根目录文件（uninstall-all.sh）走 fetchRepoFileRoot。
   const name = url.searchParams.get("name") || "";
-  if (!INSTALL_EXTRA_ALLOW.has(name)) return json({ error: "not allowed" }, 403);
+  const scope = INSTALL_EXTRA_ALLOW[name];
+  if (!scope) return json({ error: "not allowed" }, 403);
   try {
-    const src = await fetchRepoFile(env, name);
+    const src = scope === "root" ? await fetchRepoFileRoot(env, name) : await fetchRepoFile(env, name);
     return new Response(src, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   } catch (e) {
     return json({ error: `fetch ${name} failed: ${e.message}` }, 502);

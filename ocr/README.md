@@ -16,12 +16,12 @@
 
 ```bash
 # 仓库 ocr/ 目录下（install.sh/ocr.py 同目录）
-bash install.sh                 # 默认端口 8820，pip 源=清华镜像
+bash install.sh                 # 默认端口 8820，pip 源=清华镜像，systemd 开机自启
 bash install.sh --port 9900 --index https://mirrors.aliyun.com/pypi/simple/
-# 环境变量: PIP_INDEX / OCR_PORT
+# 环境变量: PIP_INDEX / OCR_PORT / OCR_DIR（默认 /opt/cybercafe-ocr，可指定沙箱/自定义目录）
 ```
 
-安装完成自动：venv + rapidocr → systemd 单元 → 启动 → 健康检查（首次运行提取模型 10-60s）。
+安装完成自动：venv + rapidocr → systemd 单元（无 systemd 的环境自动退化为后台进程模式，pidfile 在 `$OCR_DIR/ocr.pid`）→ 启动 → 健康检查（首次运行提取模型 10-60s）。
 
 ## 使用
 
@@ -50,6 +50,6 @@ bash /opt/cybercafe-ocr/uninstall.sh --keep # 保留 venv+模型（只停服务�
 
 ## 验证（开发自验记录）
 
-- 目标机 tower-zjC5pkGWm（Ubuntu 24.04 / Py3.12 / 32G）真实图片（中英文）→ CLI 与 HTTP 均输出预期文字
-- 卸载后：服务 inactive、端口无监听、venv/缓存已删、目录仅剩三件套
+- 目标机 tower-zjC5pkGWm（Ubuntu 24.04 / Py3.12 / 32G）真实图片（中英文）→ CLI 与 HTTP 均输出预期文字（前次 attempt 记录）
+- 2026-10-08 沙箱复验（macOS / Py3.9 / OCR_DIR 覆盖、无 systemd 后台模式）：真实截图 → CLI 输出文字；HTTP /health + /ocr（base64 与 URL）均 200 且文字正确；卸载（默认）后 venv/进程/缓存全清、目录仅剩三件套；卸载 --keep 后 venv/模型保留、重装即恢复
 - 真机完整验收（接入聊天/管理端）归测试任务

@@ -162,6 +162,15 @@ bash uninstall-all.sh
 bash uninstall-all.sh --purge-all
 ```
 
+**在目标机/裸机获取脚本**（仓库根目录文件，走云管统一下发通道，无需克隆仓库）：
+
+```bash
+# 下载到 /root（脚本必须存放在清理目录之外，自带自删防护检查）
+curl -fsSL 'https://cybercafe.akkak.kdns.fr/install-extra?name=uninstall-all.sh' -o /root/uninstall-all.sh
+chmod +x /root/uninstall-all.sh
+# 或 wget：wget -qO /root/uninstall-all.sh 'https://cybercafe.akkak.kdns.fr/install-extra?name=uninstall-all.sh'
+```
+
 覆盖范围：
 - **引擎**：ollama / vLLM / SGLang / Strata / OCR（t24）/ MiniMax H3（t25）及未来接入的引擎——停进程（`serve/server.py`/`sglang`/`vllm`/`ollama`）、删容器（`ollama vllm sglang chatgw cloudflared`）、删镜像（引擎+网关+隧道仓库与悬空镜像）、删数据卷（`ollama vllm-hf sglang-hf`）、清宿主二进制与 pip 依赖（best-effort）、删目录；
 - **模型内容**：Ollama models（卷内）、HF 缓存（`/root/.cache/huggingface|modelscope|torch|rapidocr|onnxruntime|onnx`）、Strata 数据（`/opt/strata` + `Strata-data`，~66GB）、OCR 模型、MiniMax H3 权重（`/opt/minimax-h3`）、原生 sglang 残留（`/models`）；
