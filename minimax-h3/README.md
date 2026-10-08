@@ -79,9 +79,16 @@ bash scripts/uninstall.sh
 - [x] 脚本开发（install.sh / uninstall.sh，bash -n + 逻辑自验）
 - [x] 权重 URL 可达性（hf-mirror 全部量化档 + 组件 7 个 URL 206 实测）
 - [x] 沙箱自验：脚本语法（bash 3.2 兼容）/ 端口规划（11435 独立）/ uninstall 端到端（10 文件目录全清 + 强清模式）
-- [x] 真机实测修复（2026-10-08，XZ-31-002）：① set -u 下 LD_LIBRARY_PATH unbound（`${LD_LIBRARY_PATH:-}`）；② sd.cpp 依赖 ggml 子模块，clone 需 `--recursive`（补子模块+清残留 build）；③ CUDA_ENV 双 PATH 前缀致 CMake 找不到 nvcc（`${CUDA_ENV#PATH=}` 插入 + 显式 `-DCMAKE_CUDA_COMPILER`）
-- [ ] 真机完整验收（16GB 显存真实生成 + 卸载后复核）——归测试任务（t27，测试三，sha256 67e837efa7218dc4 已放行开跑）
+- [x] 真机实测修复（2026-10-08，XZ-31-002，t48 累计六处）：
+  ① `set -u` 下 LD_LIBRARY_PATH unbound（`${LD_LIBRARY_PATH:-}`）
+  ② sd.cpp 依赖 ggml 子模块，clone 需 `--recursive`（补子模块+清残留 build）
+  ③ CUDA_ENV 双 PATH 前缀致 CMake 找不到 nvcc（`${CUDA_ENV#PATH=}` 插入 + 显式 `-DCMAKE_CUDA_COMPILER`）
+  ④ gcc/g++ 安装守卫分别独立判定 + cc1plus 存在性硬校验（g++-12 缺失致 `cannot execute cc1plus`，CUDA 编译器探测失败）
+  ⑤ 隔离目录软链 `cc/c++` 悬空（Ubuntu 无 cc-12/c++-12，改为指向 gcc-12/g++-12，源不存在不建链）
+  ⑥ 下载守卫静默沿用旧权重：换仓库/换档位后不重下（文件名带档位编码 + `.src` URL 记录 sidecar，不符即重下）——**第五类缺陷「不崩但静默用错数据」**
+  ⑦ 权重源修正：Abiray/MiniMax-H3-Pruned-GGUF 为 ComfyUI-GGUF 布局，sd.cpp 加载报 `model metadata validation failed`（wrong shape）——改为 unsloth/leejet 兼容源 + Comfy-Org VAE
+  ⑧ 编译幂等：sd-cli 已生成时跳过清理与重编译（仅失败残留才清 build）
+- [x] 真机 GPU 验证（XZ-31-002，16721，2026-10-08）：CUDA 版编译成功（sd-cli 242MB）；真实视频生成 `generate_video completed in 102.65s`（纯 CPU 基线 940s ≈ 9 倍加速）；**NVML 独立采样（nvml_monitor.py，ctypes 直读 libnvidia-ml，v2 version=0x02000028）：空闲基线 1MB → 峰值 8986MB，GPU 利用率非零采样 20 次、峰值 util_gpu=100%/util_mem=51%**；参数显式 `--backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu`（文本编码器留 CPU，denoiser/VAE 上卡）；sd-server 常驻 11435 且 `/v1/models` 200。证据文件：`/opt/minimax-h3/gpu_evidence_run.log`、`/opt/minimax-h3/nvml_gpu_run.log`、`/opt/minimax-h3/smoke_test.webm`
 - [ ] 云管 ENGINES 接入（可后续；H3 为视频生成引擎非聊天引擎，接入价值有限）
-- [ ] 云管 ENGINES 接入（可后续；注意 H3 为视频生成模型非聊天引擎，接入价值有限，任务约定可后置）
 
 > 目标机变更（2026-10-08 实测）：原 tower-zjC5pkGWm（COW 快照机）已回收；当前在线目标为同规格新批次 **XZ-31-001 / XZ-31-002**（RTX 4080 SUPER 16GB / 31.2GB 内存 / agent 0.4.0，batch ccb-97938710f10e）。SSH 111.4.255.126 的 2028/16289 等端口当前全部超时（NAT 通道待测试任务确认），真机执行 install.sh/uninstall.sh 时请先取得可达通道。
