@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Version: 1.0.0
 # CyberCafe 首启 provision + 克隆自愈（由 cybercafe-provision.service 每次开机触发）
 # 流程：
 #   0) 解析批次码 / API 地址（本地，不联网）

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Version: 1.0.0
 # CyberCafe 安装脚本（由云管理端动态注入 __API_BASE__ / __DEVICE_KEY__ 后下发）
 # 用法:
 #   单机模式: curl -fsSL "<云管理地址>/install.sh?key=<设备KEY>" | bash

@@ -1,3 +1,4 @@
+# Version: 1.0.0
 # 基础镜像首启 provision 单元（每次开机自检；同机重启由 provision.sh 内部指纹幂等短路，
 # 不再用 ConditionPathExists 挡 marker——克隆机 marker 指纹不一致时必须能执行自愈）
 [Unit]

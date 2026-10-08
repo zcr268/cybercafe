@@ -61,8 +61,29 @@
   <span class="spacer"></span>
   <button class="gray sm" id="btnBatch">批次安装码</button>
   <button class="gray sm" id="btnAddDev">+ 添加设备</button>
+  <button class="gray sm" id="btnScripts">脚本版本 ▾</button>
   <button class="gray sm" id="btnLogout">退出</button>
 </header>
+<div id="scriptsPanel" style="display:none;position:fixed;right:12px;top:52px;z-index:50;background:#0f172a;border:1px solid #475569;border-radius:8px;padding:12px 14px;min-width:380px;box-shadow:0 8px 24px rgba(0,0,0,.45)">
+  <div style="font-weight:600;margin-bottom:6px">脚本版本 / 指纹（下发内容 sha256 前 8 位）</div>
+  <table style="width:100%;font-size:12px">
+    <thead><tr><th style="text-align:left">文件</th><th style="text-align:left">版本</th><th style="text-align:left">哈希</th><th style="text-align:left">来源</th><th style="text-align:right">字节</th></tr></thead>
+    <tbody id="scriptsRows"><tr><td colspan="5" style="color:#64748b">加载中…</td></tr></tbody>
+  </table>
+  <div style="font-weight:600;margin:12px 0 6px">清理设置（退役阈值，实时生效）</div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <select id="retireSelect" style="flex:1;background:#0b1220;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:4px 6px;font-size:12px">
+      <option value="1800">0.5 小时</option>
+      <option value="3600">1 小时</option>
+      <option value="21600">6 小时</option>
+      <option value="86400">1 天</option>
+      <option value="259200">3 天</option>
+      <option value="604800">7 天（默认）</option>
+    </select>
+    <button class="sm" id="btnSaveRetire">保存</button>
+  </div>
+  <div style="margin-top:6px;font-size:11px;color:#64748b">离线超过阈值的设备从列表隐藏（记录保留）；离线 ≥30 天才清除（保留设备密钥）。</div>
+</div>
 
 <div id="login" class="card" style="display:none">
   <h2>管理员登录</h2>
@@ -147,10 +168,69 @@ function showApp()   { $("login").style.display = "none"; $("app").style.display
 
 $("btnLogin").onclick = async () => {
   token = $("tokenIn").value.trim();
-  try { await api("/api/admin/devices"); localStorage.setItem("cc_admin_token", token); showApp(); refresh(); }
+  try { await api("/api/admin/devices"); localStorage.setItem("cc_admin_token", token); showApp(); refresh(); warmSettings(); }
   catch (e) { $("loginErr").textContent = "登录失败: " + e.message; }
 };
 $("btnLogout").onclick = () => { localStorage.removeItem("cc_admin_token"); token=""; showLogin(); };
+
+// ---------- 脚本版本下拉 + 清理设置（t37） ----------
+let retireAfterS = 604800;   // 退役阈值（秒，实时生效；默认 7 天）
+
+function retireLabel(s) {
+  if (s >= 86400) return Math.round(s/86400) + " 天";
+  if (s >= 3600) return Math.round(s/3600) + " 小时";
+  return Math.round(s/60) + " 分钟";
+}
+
+$("btnScripts").onclick = async () => {
+  const panel = $("scriptsPanel");
+  panel.style.display = panel.style.display === "none" ? "block" : "none";
+  $("btnScripts").textContent = panel.style.display === "none" ? "脚本版本 ▾" : "脚本版本 ▴";
+  if (panel.style.display !== "none") await loadScriptsPanel();
+};
+
+async function loadScriptsPanel() {
+  try {
+    const j = await api("/api/admin/scripts");
+    $("scriptsRows").innerHTML = j.scripts.map(s => {
+      const ver = s.version || "未标注";
+      const sha = s.sha || (s.error ? "获取失败" : "-");
+      const src = s.source || "-";
+      return `<tr>
+        <td class="mono" style="color:#7dd3fc">${esc(s.name)}</td>
+        <td>${esc(String(ver))}</td>
+        <td class="mono">${esc(sha)}</td>
+        <td>${esc(src)}</td>
+        <td style="text-align:right">${s.bytes ?? "-"}</td>
+      </tr>`;
+    }).join("");
+  } catch (e) { $("scriptsRows").innerHTML = `<tr><td colspan="5" style="color:#ef4444">加载失败: ${esc(e.message)}</td></tr>`; }
+  try {
+    const st = await api("/api/admin/settings");
+    retireAfterS = st.retire_after_s;
+    $("retireSelect").value = String(st.retire_after_s);
+    renderRetiredHint();
+  } catch (e) { /* settings 加载失败不阻塞面板 */ }
+}
+
+$("btnSaveRetire").onclick = async () => {
+  try {
+    const v = parseInt($("retireSelect").value, 10);
+    const j = await api("/api/admin/settings", { method: "POST", body: JSON.stringify({ retire_after_s: v }) });
+    retireAfterS = j.retire_after_s;
+    toast(`退役阈值已设为 ${retireLabel(j.retire_after_s)}，列表已按新阈值重新分区`);
+    refresh();
+  } catch (e) { toast(e.message, false); }
+};
+
+// 登录/自动登录后预热设置（保证 retiredHint 文案与阈值选择器初始正确）
+function warmSettings() {
+  api("/api/admin/settings").then(j => {
+    retireAfterS = j.retire_after_s;
+    const sel = $("retireSelect"); if (sel) sel.value = String(j.retire_after_s);
+    renderRetiredHint();
+  }).catch(() => {});
+}
 
 $("btnAddDev").onclick = async () => {
   const label = prompt("设备备注（可空）:") || "";
@@ -284,7 +364,7 @@ function renderRetiredHint() {
   if (!el) return;
   if (!showRetired && retiredHidden > 0) {
     el.style.display = "block";
-    $("retiredText").textContent = `已隐藏 ${retiredHidden} 台离线设备（>7 天）`;
+    $("retiredText").textContent = `已隐藏 ${retiredHidden} 台离线设备（>${retireLabel(retireAfterS)}）`;
     $("retiredHint").querySelector("button").textContent = "展开";
   } else if (showRetired) {
     el.style.display = "block";
@@ -582,7 +662,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && to
 
 // ---------- 启动 ----------
 if (token) {
-  api("/api/admin/devices").then(() => { showApp(); refresh(); scheduleRefresh(); })
+  api("/api/admin/devices").then(() => { showApp(); refresh(); warmSettings(); scheduleRefresh(); })
     .catch(() => showLogin());
 } else showLogin();
 </script>

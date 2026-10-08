@@ -105,6 +105,31 @@ async function fetchRepoFile(env, name) {
   }
 }
 
+// t37：与 fetchRepoFile 同通道逻辑的并行版本，返回 { text, source }（source: local/raw/jsdelivr）。
+// 不改动现有 fetchRepoFile 的返回契约（现有调用方继续只拿文本）。
+async function fetchRepoFileWithChannel(env, name) {
+  if (env.AGENT_LOCAL_BASE) {
+    try { return { text: await readLocalRepoFile(env, name), source: "local" }; }
+    catch (e) { /* 本地通道失败 → 网络通道兜底 */ }
+  }
+  const raw = `${rawBase(env)}/${name}`;
+  const jsd = `${jsdelivrBase(env)}/${name}`;
+  const firstUrl = lastNetworkOk === "jsdelivr" ? jsd : raw;
+  const secondUrl = firstUrl === jsd ? raw : jsd;
+  const label = firstUrl === jsd ? "jsdelivr" : "raw";
+  try {
+    const resp = await fetch(firstUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    lastNetworkOk = label;
+    return { text: await resp.text(), source: label };
+  } catch (e1) {
+    const resp = await fetch(secondUrl, { cf: { cacheTtl: 30 }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    lastNetworkOk = secondUrl === jsd ? "jsdelivr" : "raw";
+    return { text: await resp.text(), source: secondUrl === jsd ? "jsdelivr" : "raw" };
+  }
+}
+
 // 经 cloudflared 等反代时 url.protocol 是 http，用 X-Forwarded-Proto 还原真实协议
 function publicOrigin(request, url) {
   const proto = request.headers.get("X-Forwarded-Proto") || url.protocol.replace(":", "");
@@ -345,14 +370,71 @@ async function kvListAll(kv, prefix) {
   return out;
 }
 
-// ---------- 离线设备惰性清理（t35） ----------
+// ---------- 离线设备惰性清理（t35） + 退役阈值可配置（t37） ----------
 // 生产是 wrangler dev 跑在容器里、无 Cron Triggers → 惰性触发：
 // 管理端请求设备列表时距上次清理 ≥1h 执行一次，时间戳写 KV（meta:last_cleanup）。
-const RETIRE_AFTER_S = 7 * 86400;    // 退役：离线 ≥7 天（列表默认隐藏，记录保留可展开）
-const PURGE_AFTER_S = 30 * 86400;    // 清除：离线 ≥30 天（删 device:/cmd:/log:，保留复活钥匙）
+const PURGE_AFTER_S = 30 * 86400;    // 清除：离线 ≥30 天（删 device:/cmd:/log:，保留复活钥匙）——阈值固定，用户不改
+const RETIRE_OPTIONS_S = [1800, 3600, 21600, 86400, 259200, 604800]; // 退役可选项：0.5h/1h/6h/1d/3d/7d
+const DEFAULT_RETIRE_AFTER_S = 604800;   // 默认退役：7 天
+const SETTINGS_KEY = "settings:retire_after_s";
 const CLEANUP_INTERVAL_S = 3600;     // 惰性触发间隔
 const CLEANUP_CAP = 200;             // 单次调用处理上限（防大列表单请求撑爆）
 const META_CLEANUP_KEY = "meta:last_cleanup";
+
+// 退役阈值读取：KV 持久化；未设置/非法值回落默认 7 天（实时生效——退役是每次刷新按当前阈值的派生值）
+async function getRetireAfterS(env) {
+  const v = await env.CYBERCAFE_KV.get(SETTINGS_KEY);
+  if (v === null || v === undefined) return DEFAULT_RETIRE_AFTER_S;
+  const n = Number(v);
+  return RETIRE_OPTIONS_S.includes(n) ? n : DEFAULT_RETIRE_AFTER_S;
+}
+
+async function handleAdminGetSettings(env) {
+  return json({ ok: true, retire_after_s: await getRetireAfterS(env), purge_after_s: PURGE_AFTER_S, options: RETIRE_OPTIONS_S });
+}
+
+async function handleAdminSetSettings(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const v = body.retire_after_s;
+  // 服务端白名单校验：只接受 6 个选项值，其余一律 400 且不落库
+  if (typeof v !== "number" || !RETIRE_OPTIONS_S.includes(v)) {
+    return json({ error: `retire_after_s 必须是 ${RETIRE_OPTIONS_S.join("/")} 之一` }, 400);
+  }
+  await env.CYBERCAFE_KV.put(SETTINGS_KEY, String(v));
+  return json({ ok: true, retire_after_s: v });
+}
+
+// ---------- 脚本版本/指纹（t37） ----------
+// 4 个下发脚本：agent 用 VERSION= 常量，其余三个用注释式 `# Version: X.Y.Z`（B 部分新增）
+const SCRIPT_FILES = ["cybercafe-agent.py", "install.sh", "provision.sh", "cybercafe-provision.service"];
+const SCRIPT_VERSION_RE = /^#\s*Version:\s*([0-9.]+)/m;
+
+async function scriptInfo(env, name) {
+  const { text, source } = await fetchRepoFileWithChannel(env, name);
+  const sha = (await sha256hex(text)).slice(0, 8);      // 实际下发字节的 sha256 前 8 位
+  const bytes = new TextEncoder().encode(text).length;
+  let version = null;
+  if (name === "cybercafe-agent.py") {
+    const m = text.match(/^VERSION\s*=\s*"([^"]+)"/m);
+    version = m ? m[1] : null;
+  } else {
+    const m = text.match(SCRIPT_VERSION_RE);
+    version = m ? m[1] : null;
+  }
+  return { name, sha, bytes, source, version };
+}
+
+async function handleAdminScripts(env) {
+  const out = [];
+  for (const name of SCRIPT_FILES) {
+    try {
+      out.push(await scriptInfo(env, name));
+    } catch (e) {
+      out.push({ name, sha: null, bytes: 0, source: null, version: null, error: e.message });
+    }
+  }
+  return json({ ok: true, scripts: out });
+}
 
 // 离线时长：last_seen 缺失用 first_seen 兜底；两者都缺返回 -1（保守跳过，不清理不隐藏）
 function deviceOfflineSeconds(rec, now) {
@@ -365,6 +447,7 @@ function deviceOfflineSeconds(rec, now) {
 // ——必须保留 devicekey:<hash>（agent 只启动时注册一次，删密钥=机器即使活着也永久消失；
 //    保留密钥=回来心跳即复活）；同时保留 prov:machine/prov:hw 映射（同机回来不重领码）。
 async function runDeviceCleanup(env, now) {
+  const retireAfterS = await getRetireAfterS(env);   // 退役阈值走配置（实时生效）
   const keys = await kvListAll(env.CYBERCAFE_KV, "device:");
   let purged = 0, retired = 0, scanned = 0;
   for (const k of keys) {
@@ -379,7 +462,7 @@ async function runDeviceCleanup(env, now) {
       await env.CYBERCAFE_KV.delete(`cmd:${id}`);
       await env.CYBERCAFE_KV.delete(`log:${id}`);
       purged++;
-    } else if (secs >= RETIRE_AFTER_S) {
+    } else if (secs >= retireAfterS) {
       retired++;   // 退役仅按时间派生（记录保留，列表侧隐藏）；无需写状态
     }
   }
@@ -405,6 +488,7 @@ async function handleAdminDevices(env, url) {
   const now = Math.floor(Date.now() / 1000);
   // 惰性触发：距上次清理 ≥1h 执行一次（幂等；在此先清后列，列表反映最新状态）
   await maybeRunLazyCleanup(env, now);
+  const retireAfterS = await getRetireAfterS(env);   // 退役阈值走配置（实时生效）
   const includeRetired = (url.searchParams.get("include_retired") || "") === "1";
   const keys = await kvListAll(env.CYBERCAFE_KV, "device:");
   const recs = await Promise.all(keys.map(k => env.CYBERCAFE_KV.get(k.name, "json")));
@@ -414,7 +498,7 @@ async function handleAdminDevices(env, url) {
     if (!rec) continue;
     rec.online = now - (rec.last_seen || 0) < 35;
     const secs = deviceOfflineSeconds(rec, now);
-    if (secs >= RETIRE_AFTER_S) {
+    if (secs >= retireAfterS) {
       if (!includeRetired) { retiredHidden++; continue; }   // 退役隐藏（计数），?include_retired=1 展开
     }
     devices.push(rec);
@@ -670,6 +754,12 @@ export default {
           return await handleAdminDevices(env, url);
         if (path === "/api/admin/devices/cleanup" && request.method === "POST")
           return await handleAdminCleanup(env);
+        if (path === "/api/admin/scripts" && request.method === "GET")
+          return await handleAdminScripts(env);
+        if (path === "/api/admin/settings" && request.method === "GET")
+          return await handleAdminGetSettings(env);
+        if (path === "/api/admin/settings" && request.method === "POST")
+          return await handleAdminSetSettings(request, env);
         if (path === "/api/admin/devices/new" && request.method === "POST")
           return await handleAdminNewDevice(request, env, publicOrigin(request, url));
         if (path === "/api/admin/deploy" && request.method === "POST")
