@@ -15,6 +15,7 @@ VERSION = "1.0.0"
 
 import hashlib
 import json
+import threading
 import os
 import re
 import shutil
@@ -111,8 +112,12 @@ def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
         time.sleep(3)
 # ---------------------------------------------------------------- 部署流水线
 
-REGISTRY_MIRRORS = ["https://docker.m.daocloud.io", "https://docker.1ms.run",
-                    "https://docker.xuanyuan.me"]
+# 国内 docker 镜像源（t51，实测依据 2026-10-08，XZ-31-001/6026）：
+#   docker.m.daocloud.io —— 唯一实测可用源：拉 alpine 3.3s / ollama 1s；
+#   另两个候选站与直连 docker.io 均实测 60s 超时（CN 网络不可达），已从候选移除（防多源并发被死源拖垮）。
+#   保留 3s 健康探测：daocloud 恒保底且排首位，探测误判也不写空列表；全灭时保留原列表并告警。
+REGISTRY_MIRRORS = ["https://docker.m.daocloud.io"]
+MIRROR_PROBE_TIMEOUT_S = 3   # 探测超时：短且可预期（当前单候选，最坏 ~3s；多候选时并行、总耗时收敛 ~3s）
 
 # 引擎定义：容器内监听端口统一映射到宿主 127.0.0.1:11434（nginx 网关不变）
 # - vLLM v0.4.1 / SGLang v0.4.1.post4-cu121 均为 CUDA 12.1 基底镜像，
@@ -181,6 +186,26 @@ def step_docker():
     run("systemctl enable --now docker")
     return "docker.io 安装完成"
 
+def _probe_mirrors(candidates):
+    """并行健康探测（threading 标准库）：registry /v2/ 任意 HTTP 应答（含 401 鉴权页）即视为可达；
+    000/超时=死源。仅配置镜像那一步调用一次（非每次 deploy）。串行最坏 len×3s，并行收敛 ~3s。"""
+    def _ok(url):
+        try:
+            urllib.request.urlopen(urllib.request.Request(url.rstrip("/") + "/v2/"),
+                                   timeout=MIRROR_PROBE_TIMEOUT_S)
+            return True
+        except urllib.error.HTTPError:
+            return True   # 401/403 等 = registry 在应答
+        except Exception:
+            return False
+    res = {}
+    def _run(u):
+        res[u] = _ok(u)
+    ts = [threading.Thread(target=_run, args=(u,)) for u in candidates]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    return res
+
 def step_mirrors():
     path = "/etc/docker/daemon.json"
     conf = {}
@@ -190,13 +215,21 @@ def step_mirrors():
                 conf = json.load(f)
         except Exception:
             conf = {}
-    mirrors = list(dict.fromkeys(REGISTRY_MIRRORS + conf.get("registry-mirrors", [])))
+    # 健康探测：仅写入存活源；daocloud 恒保底且排首位（探测误判也不写空列表）
+    alive_map = _probe_mirrors(REGISTRY_MIRRORS)
+    selected = [u for u in REGISTRY_MIRRORS if alive_map.get(u)]
+    for u in REGISTRY_MIRRORS:
+        if u not in selected:
+            selected.append(u)   # 硬化：候选全部保留（含误判死的），宁试可能活的不写空
+    if not alive_map.get(REGISTRY_MIRRORS[0]):
+        log("警告: 镜像源探测失败（含 daocloud），已保留候选原样写入，docker pull 可能变慢")
+    mirrors = list(dict.fromkeys(selected + conf.get("registry-mirrors", [])))
     conf["registry-mirrors"] = mirrors
     with open(path, "w") as f:
         json.dump(conf, f, indent=2)
     run("systemctl restart docker", timeout=60)
     time.sleep(3)
-    return "镜像加速: " + ", ".join(mirrors)
+    return "镜像加速(健康探测后): " + ", ".join(mirrors)
 
 def step_gpu_toolkit():
     if shutil.which("nvidia-ctk"):
