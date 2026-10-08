@@ -31,8 +31,7 @@ H3_ROOT="${H3_ROOT:-/opt/minimax-h3}"          # 全部内容收敛此目录（�
 H3_QUANT="${H3_QUANT:-UD-Q2_K_XL}"             # 默认档：unsloth UD-Q2_K_XL（sd.cpp 兼容，t48 实测 Abiray Q3_K_M 为 ComfyUI 布局不兼容）
 H3_SERVER="${H3_SERVER:-1}"                    # 1=常驻 sd-server(11435)，0=CLI 验证
 H3_PORT="${H3_PORT:-11435}"                    # 独立端口，避开 11434
-H3_DIFF_REPO="unsloth/MiniMax-H3-GGUF"         # 扩散主模型（sd.cpp 兼容 GGUF：unsloth/leejet 均可，Abiray 为 ComfyUI 布局已被 t48 实测否决）
-H3_AUX_REPO="unsloth/MiniMax-H3-GGUF"          # 文本编码器（与 denoiser 同源，格式一致）
+H3_AUX_REPO="unsloth/MiniMax-H3-GGUF"          # 文本编码器仓库（denoiser 档位各自内置 repo，见 case）
 H3_VAE_REPO="Comfy-Org/MiniMax-H3"             # VAE（safetensors，官方 diffusers 仓库）
 H3_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"   # 国内镜像优先
 SDCPP_DIR="$H3_ROOT/sd.cpp"
@@ -150,8 +149,10 @@ say "=== 下载权重（HF_ENDPOINT=${H3_ENDPOINT}，约 29GB，按需续传）=
 # 换源后同名文件会跳过导致继续用错误权重跑——曾让 t48 白下 25GB）。
 # dl <repo> <subpath> —— dest 名 = subpath 文件名，天然隔离不同档位/来源
 dl() {
-  local url="$H3_ENDPOINT/$1/resolve/main/$2"
-  local dest="$MODELS_DIR/$(basename "$2")"
+  local url
+  url="$H3_ENDPOINT/$1/resolve/main/$2"
+  local dest
+  dest="$MODELS_DIR/$(basename "$2")"
   local srcfile="$dest.src"
   if [ ! -f "$dest" ] || [ -f "$srcfile" ] && [ "$(cat "$srcfile" 2>/dev/null)" != "$url" ]; then
     say "下载 $(basename "$2") ..."
