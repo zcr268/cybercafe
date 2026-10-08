@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Version: 1.0.0
+# Version: 1.0.1
 # CyberCafe 安装脚本（由云管理端动态注入 __API_BASE__ / __DEVICE_KEY__ 后下发）
 # 用法:
 #   单机模式: curl -fsSL "<云管理地址>/install.sh?key=<设备KEY>" | bash
@@ -21,10 +21,40 @@ BATCH_CODE="${PROVISION_CODE:-}"
 IMAGE_PREP=""
 IMAGE_ROOT=""
 
-# 硬件指纹（与 provision.sh 同算法）：物理网卡 MAC 排序后 sha256 前 12 位；
-# 无物理网卡时回退 sha256(/etc/machine-id)。克隆换机（MAC 变）→ 指纹变 → 云端按指纹发新 key。
+# 硬件指纹（install.sh 与 provision.sh 各一份、必须逐字相同；t39 三级回退）：
+#   ① GPU UUID（nvidia-smi，多卡 UUID 排序 join）→ ② 物理网卡 MAC → ③ machine-id
+# 输出格式：`<fp> <source>`（caller 用 read HW_FP FP_SOURCE 解析；$( ) 子壳内改不了外部变量）
+FP_SOURCE="gpu"
 hw_fingerprint() {
-  local macs=() dev name mac joined id
+  local macs=() dev name mac joined id nvidia_bin out src fp
+  # ---- ① GPU UUID（nvidia-smi 探测：PATH → 常见绝对路径；输出空/失败一律降级，不得中断装机）----
+  src="gpu"
+  nvidia_bin=""
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia_bin="$(command -v nvidia-smi)"
+  else
+    for p in /usr/bin/nvidia-smi /usr/local/bin/nvidia-smi /usr/lib/wsl/lib/nvidia-smi; do
+      if [ -x "$p" ]; then nvidia_bin="$p"; break; fi
+    done
+  fi
+  out=""
+  if [ -n "$nvidia_bin" ]; then
+    out="$($nvidia_bin --query-gpu=uuid --format=csv,noheader 2>/dev/null || true)"
+  fi
+  if [ -n "$out" ]; then
+    joined="$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort | paste -sd'|' - || true)"
+    if [ -n "$joined" ]; then
+      if command -v sha256sum >/dev/null 2>&1; then
+        fp="$(printf '%s' "$joined" | sha256sum | cut -c1-12)"
+      else
+        fp="$(printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12)"
+      fi
+      echo "$fp $src"
+      return 0
+    fi
+  fi
+  # ---- ② 物理网卡 MAC（排除列表/全零 MAC 同 t33；排序后 sha256 前 12 位）----
+  src="mac"
   for dev in /sys/class/net/*; do
     name="$(basename "$dev")"
     case "$name" in
@@ -38,18 +68,22 @@ hw_fingerprint() {
   if [ "${#macs[@]}" -gt 0 ]; then
     joined="$(printf '%s\n' "${macs[@]}" | sort | paste -sd'|' -)"
     if command -v sha256sum >/dev/null 2>&1; then
-      printf '%s' "$joined" | sha256sum | cut -c1-12
+      fp="$(printf '%s' "$joined" | sha256sum | cut -c1-12)"
     else
-      printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12
+      fp="$(printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12)"
     fi
-  else
-    id="$( { cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || hostname; } )"
-    if command -v sha256sum >/dev/null 2>&1; then
-      printf '%s' "$id" | sha256sum | cut -c1-12
-    else
-      printf '%s' "$id" | cksum | awk '{print $1}' | cut -c1-12
-    fi
+    echo "$fp $src"
+    return 0
   fi
+  # ---- ③ machine-id 兜底 ----
+  src="machine-id"
+  id="$( { cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || hostname; } )"
+  if command -v sha256sum >/dev/null 2>&1; then
+    fp="$(printf '%s' "$id" | sha256sum | cut -c1-12)"
+  else
+    fp="$(printf '%s' "$id" | cksum | awk '{print $1}' | cut -c1-12)"
+  fi
+  echo "$fp $src"
 }
 
 # 参数: --batch <code> | --image-prep | --api-base <url> | --root <dir>
@@ -117,8 +151,9 @@ mkdir -p "$INSTALL_DIR"
 # 批次模式：从 config.env（provision.sh 已写）或云端 provision API 取得 API_BASE/DEVICE_KEY
 if [ -n "$BATCH_CODE" ]; then
     echo "[cybercafe] 批次模式: batch=$BATCH_CODE"
-    HW_FP="$(hw_fingerprint)"
-    echo "[cybercafe] 硬件指纹: $HW_FP"
+    read HW_FP FP_SOURCE <<< "$(hw_fingerprint)"
+    FP_SOURCE="${FP_SOURCE:-gpu}"
+    echo "[cybercafe] 硬件指纹: $HW_FP（来源: $FP_SOURCE）"
     if [ -f "$INSTALL_DIR/config.env" ]; then . "$INSTALL_DIR/config.env"; fi
     if [ -z "${API_BASE:-}" ] || [ "$API_BASE" = "$PH_API" ]; then
         API_BASE="${PROVISION_API_BASE:-}"
@@ -133,7 +168,7 @@ if [ -n "$BATCH_CODE" ]; then
         echo "[cybercafe] 向云端申请设备密钥 (machine=$MACHINE_ID, fp=$HW_FP) ..."
         PROV_JSON="$(curl -sS --max-time 60 -X POST "$API_BASE/api/device/provision" \
             -H "Content-Type: application/json" \
-            -d "{\"batch_code\":\"$BATCH_CODE\",\"machine_id\":\"$MACHINE_ID\",\"hardware_id\":\"$HW_FP\",\"device\":{\"hostname\":\"$(hostname | tr -d '"')\",\"os\":\"$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -1)\"}}" 2>&1 || true)"
+            -d "{\"batch_code\":\"$BATCH_CODE\",\"machine_id\":\"$MACHINE_ID\",\"hardware_id\":\"$HW_FP\",\"hw_source\":\"$FP_SOURCE\",\"device\":{\"hostname\":\"$(hostname | tr -d '"')\",\"os\":\"$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -1)\"}}" 2>&1 || true)"
         DEVICE_KEY="$(echo "$PROV_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("device_key",""))' 2>/dev/null || true)"
         [ -z "$DEVICE_KEY" ] && { echo "[cybercafe] ERROR: 批次申请密钥失败: $PROV_JSON" >&2; exit 1; }
         RESP_API="$(echo "$PROV_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("api_base",""))' 2>/dev/null || true)"

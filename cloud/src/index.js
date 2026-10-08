@@ -292,6 +292,9 @@ async function handleDeviceProvision(request, env, url) {
   const code = String(body.batch_code || "").trim();
   const machineId = String(body.machine_id || "").trim();
   const hardwareId = String(body.hardware_id || "").trim();
+  const hwSourceRaw = String(body.hw_source || "").trim();
+  // t39：指纹来源 gpu|mac|machine-id；空/未知值按空处理（旧脚本/旧机器不携带）
+  const hwSource = ["gpu", "mac", "machine-id"].includes(hwSourceRaw) ? hwSourceRaw : "";
   if (!code) return json({ error: "batch_code required" }, 400);
   if (!machineId) return json({ error: "machine_id required" }, 400);
   const now = Math.floor(Date.now() / 1000);
@@ -321,14 +324,19 @@ async function handleDeviceProvision(request, env, url) {
     keyHash = await sha256hex(key);
     const mappedRec = { key, batch: code, created_at: now, machine_id: machineId };
     if (hardwareId) mappedRec.hw_id = hardwareId;
+    if (hwSource) mappedRec.hw_source = hwSource;
     await env.CYBERCAFE_KV.put(`devicekey:${keyHash}`,
       JSON.stringify({ label: String(info.hostname || "").slice(0, 120), batch: code,
-                       machine_id: machineId, ...(hardwareId ? { hw_id: hardwareId } : {}), created_at: now }));
+                       machine_id: machineId,
+                       ...(hardwareId ? { hw_id: hardwareId } : {}),
+                       ...(hwSource ? { hw_source: hwSource } : {}),
+                       created_at: now }));
     await env.CYBERCAFE_KV.put(mapKey, JSON.stringify(mappedRec));
     // 兼容：同时维护 machine 映射（旧路径去重继续可用；克隆换机后更新为最新 key）
     if (hardwareId) {
       await env.CYBERCAFE_KV.put(`prov:machine:${machineId}`,
-        JSON.stringify({ key, batch: code, created_at: now, machine_id: machineId, hw_id: hardwareId }));
+        JSON.stringify({ key, batch: code, created_at: now, machine_id: machineId, hw_id: hardwareId,
+                         ...(hwSource ? { hw_source: hwSource } : {}) }));
     }
     // 配额计数（KV 无原子自增；provision 为一次性首启行为，读改写可接受）
     batch.used = (batch.used || 0) + 1;
@@ -345,6 +353,7 @@ async function handleDeviceProvision(request, env, url) {
     key_hash: keyHash,
     machine_id: machineId,
     hw_id: hardwareId || (mapped && mapped.hw_id) || old.hw_id || "",
+    hw_source: hwSource || (mapped && mapped.hw_source) || old.hw_source || "",
     batch: code,
     hostname: String(info.hostname || old.hostname || "").slice(0, 120),
     os: String(info.os || old.os || "").slice(0, 120),
