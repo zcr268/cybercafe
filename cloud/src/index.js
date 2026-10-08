@@ -345,18 +345,82 @@ async function kvListAll(kv, prefix) {
   return out;
 }
 
-async function handleAdminDevices(env) {
+// ---------- 离线设备惰性清理（t35） ----------
+// 生产是 wrangler dev 跑在容器里、无 Cron Triggers → 惰性触发：
+// 管理端请求设备列表时距上次清理 ≥1h 执行一次，时间戳写 KV（meta:last_cleanup）。
+const RETIRE_AFTER_S = 7 * 86400;    // 退役：离线 ≥7 天（列表默认隐藏，记录保留可展开）
+const PURGE_AFTER_S = 30 * 86400;    // 清除：离线 ≥30 天（删 device:/cmd:/log:，保留复活钥匙）
+const CLEANUP_INTERVAL_S = 3600;     // 惰性触发间隔
+const CLEANUP_CAP = 200;             // 单次调用处理上限（防大列表单请求撑爆）
+const META_CLEANUP_KEY = "meta:last_cleanup";
+
+// 离线时长：last_seen 缺失用 first_seen 兜底；两者都缺返回 -1（保守跳过，不清理不隐藏）
+function deviceOfflineSeconds(rec, now) {
+  const ts = rec.last_seen || rec.first_seen || 0;
+  if (!ts) return -1;
+  return Math.max(0, now - ts);
+}
+
+// 幂等可重入清理：≥30 天清除 device:/cmd:/log:
+// ——必须保留 devicekey:<hash>（agent 只启动时注册一次，删密钥=机器即使活着也永久消失；
+//    保留密钥=回来心跳即复活）；同时保留 prov:machine/prov:hw 映射（同机回来不重领码）。
+async function runDeviceCleanup(env, now) {
   const keys = await kvListAll(env.CYBERCAFE_KV, "device:");
+  let purged = 0, retired = 0, scanned = 0;
+  for (const k of keys) {
+    if (++scanned > CLEANUP_CAP) break;
+    const id = k.name.slice("device:".length);
+    const rec = await env.CYBERCAFE_KV.get(k.name, "json");
+    if (!rec) continue;
+    const secs = deviceOfflineSeconds(rec, now);
+    if (secs < 0) continue;
+    if (secs >= PURGE_AFTER_S) {
+      await env.CYBERCAFE_KV.delete(`device:${id}`);
+      await env.CYBERCAFE_KV.delete(`cmd:${id}`);
+      await env.CYBERCAFE_KV.delete(`log:${id}`);
+      purged++;
+    } else if (secs >= RETIRE_AFTER_S) {
+      retired++;   // 退役仅按时间派生（记录保留，列表侧隐藏）；无需写状态
+    }
+  }
+  return { purged, retired, scanned };
+}
+
+async function handleAdminCleanup(env) {
   const now = Math.floor(Date.now() / 1000);
+  const r = await runDeviceCleanup(env, now);
+  await env.CYBERCAFE_KV.put(META_CLEANUP_KEY, String(now));
+  return json({ ok: true, ...r });
+}
+
+async function maybeRunLazyCleanup(env, now) {
+  const last = Number((await env.CYBERCAFE_KV.get(META_CLEANUP_KEY)) || 0);
+  if (now - last < CLEANUP_INTERVAL_S) return null;
+  const r = await runDeviceCleanup(env, now);
+  await env.CYBERCAFE_KV.put(META_CLEANUP_KEY, String(now));
+  return r;
+}
+
+async function handleAdminDevices(env, url) {
+  const now = Math.floor(Date.now() / 1000);
+  // 惰性触发：距上次清理 ≥1h 执行一次（幂等；在此先清后列，列表反映最新状态）
+  await maybeRunLazyCleanup(env, now);
+  const includeRetired = (url.searchParams.get("include_retired") || "") === "1";
+  const keys = await kvListAll(env.CYBERCAFE_KV, "device:");
   const recs = await Promise.all(keys.map(k => env.CYBERCAFE_KV.get(k.name, "json")));
   const devices = [];
+  let retiredHidden = 0;
   for (const rec of recs) {
     if (!rec) continue;
     rec.online = now - (rec.last_seen || 0) < 35;
+    const secs = deviceOfflineSeconds(rec, now);
+    if (secs >= RETIRE_AFTER_S) {
+      if (!includeRetired) { retiredHidden++; continue; }   // 退役隐藏（计数），?include_retired=1 展开
+    }
     devices.push(rec);
   }
   devices.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
-  return json({ ok: true, devices, models: MODELS, engines: ENGINES });
+  return json({ ok: true, devices, models: MODELS, engines: ENGINES, retired_hidden: retiredHidden });
 }
 
 async function handleAdminCreateBatch(request, env) {
@@ -603,7 +667,9 @@ export default {
         const a = adminOk(request, env);
         if (!a.ok) return a.resp;
         if (path === "/api/admin/devices" && request.method === "GET")
-          return await handleAdminDevices(env);
+          return await handleAdminDevices(env, url);
+        if (path === "/api/admin/devices/cleanup" && request.method === "POST")
+          return await handleAdminCleanup(env);
         if (path === "/api/admin/devices/new" && request.method === "POST")
           return await handleAdminNewDevice(request, env, publicOrigin(request, url));
         if (path === "/api/admin/deploy" && request.method === "POST")

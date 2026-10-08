@@ -77,6 +77,11 @@
 <main id="app" style="display:none">
   <div class="card">
     <h2>设备列表（每 5 秒自动刷新）</h2>
+    <div id="retiredHint" style="display:none;margin-bottom:8px;font-size:12px;color:#94a3b8;background:#0b1220;border:1px solid #334155;border-radius:6px;padding:6px 10px">
+      <span id="retiredText"></span>
+      <button class="sm" onclick="toggleRetired()">展开</button>
+      <button class="sm" onclick="cleanupNow()">立即清理</button>
+    </div>
     <table>
       <thead><tr><th>设备</th><th>硬件</th><th>部署状态</th><th>操作</th></tr></thead>
       <tbody id="devRows"></tbody>
@@ -262,11 +267,43 @@ function ago(ts) {
 
 async function refresh() {
   try {
-    const j = await api("/api/admin/devices");
+    const j = await api("/api/admin/devices" + (showRetired ? "?include_retired=1" : ""));
     devices = j.devices; engines = j.engines || {};
+    retiredHidden = j.retired_hidden || 0;
+    renderRetiredHint();
     renderDevices(); renderChatDevs(); loadBatches();
   } catch (e) { /* token 失效会自行跳登录 */ }
 }
+
+// ---------- 离线设备退役隐藏（t35） ----------
+let showRetired = false;   // 展开退役设备（?include_retired=1）
+let retiredHidden = 0;     // 列表默认隐藏的退役离线设备数（>7 天）
+
+function renderRetiredHint() {
+  const el = $("retiredHint");
+  if (!el) return;
+  if (!showRetired && retiredHidden > 0) {
+    el.style.display = "block";
+    $("retiredText").textContent = `已隐藏 ${retiredHidden} 台离线设备（>7 天）`;
+    $("retiredHint").querySelector("button").textContent = "展开";
+  } else if (showRetired) {
+    el.style.display = "block";
+    $("retiredText").textContent = `已显示全部设备（含退役离线设备）`;
+    $("retiredHint").querySelector("button").textContent = "收起";
+  } else {
+    el.style.display = "none";
+  }
+}
+
+window.toggleRetired = () => { showRetired = !showRetired; refresh(); };
+
+window.cleanupNow = async () => {
+  try {
+    const j = await api("/api/admin/devices/cleanup", { method: "POST" });
+    toast(`离线清理完成：清除 ${j.purged} 台，退役 ${j.retired} 台`);
+    refresh();
+  } catch (e) { toast(e.message, false); }
+};
 
 function renderDevices() {
   $("devRows").innerHTML = devices.map(d => {
