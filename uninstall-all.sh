@@ -114,8 +114,9 @@ detect_items() {
       local repo r
       repo="${img%%:*}"
       for r in "${ENGINE_IMAGE_REPOS[@]}"; do
+        # 包含匹配：docker.m.daocloud.io/ollama/ollama 等 mirror 前缀 repo 也命中（真机验收 F1）
         case "$repo" in
-          "$r"|"$r"/* ) out+="image $img\n"; break ;;
+          *"$r"*) out+="image $img\n"; break ;;
         esac
       done
     done
@@ -195,15 +196,25 @@ rm_containers() {
 
 rm_images() {
   say "=== 4/8 删除引擎镜像 ==="
-  local img repo r removed
-  removed=0
+  local img repo r id ids=() removed=0
   for img in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); do
     repo="${img%%:*}"
     for r in "${ENGINE_IMAGE_REPOS[@]}"; do
+      # 包含匹配：识别 mirror 前缀 repo（如 docker.m.daocloud.io/ollama/ollama）；
+      # 本机实际部署源即带 mirror 前缀 tag（真机验收 F1），不识别将残留数 G 镜像层
       case "$repo" in
-        "$r"|"$r"/* ) run "docker rmi -f '$img' 2>/dev/null || true"; removed=1; break ;;
+        *"$r"*)
+          id="$(docker inspect --format '{{.Id}}' "$img" 2>/dev/null)"
+          case " ${ids[*]:-} " in
+            *" $id "*) ;; *) [ -n "$id" ] && ids+=("$id") ;;
+          esac
+          removed=1; break ;;
       esac
     done
+  done
+  # 按镜像 ID 删除：连带删除该镜像全部 tag（含 mirror 前缀 tag），镜像层才真正释放磁盘
+  for id in "${ids[@]:-}"; do
+    [ -n "$id" ] && run "docker rmi -f '$id' 2>/dev/null || true"
   done
   # 悬空镜像（引擎多阶段拉取的 <none> 残留）
   if [ "$(docker images -q -f dangling=true 2>/dev/null | wc -l)" -gt 0 ]; then
@@ -275,12 +286,20 @@ verify() {
   say "-- 镜像 --"
   local imgs
   imgs=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
-  for r in "${ENGINE_IMAGE_REPOS[@]}"; do
-    if printf '%s' "$imgs" | grep -q "^$r:"; then
-      warn "残留镜像: $(printf '%s\n' "$imgs" | grep "^$r:" | tr '\n' ' ')"
-      rc=1
-    fi
-  done
+  local leftover=""
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    repo="${line%%:*}"
+    for r in "${ENGINE_IMAGE_REPOS[@]}"; do
+      # 与删除同口径的包含匹配：mirror 前缀 repo 也算残留（真机验收 F1）
+      case "$repo" in
+        *"$r"*) leftover="$leftover $line"; break ;;
+      esac
+    done
+  done <<< "$imgs"
+  if [ -n "$leftover" ]; then
+    warn "残留镜像:$leftover"; rc=1
+  fi
   if [ "$(docker images -q -f dangling=true 2>/dev/null | wc -l)" -gt 0 ]; then
     warn "残留悬空镜像 $(docker images -q -f dangling=true 2>/dev/null | wc -l) 个"; rc=1
   fi

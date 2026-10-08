@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # CyberCafe OCR 一键卸载 + 全面清理
-# 用法: bash uninstall.sh [--keep]
+# 用法: bash uninstall.sh [--keep] [--yes]
+#   --yes：跳过确认（接口对齐 uninstall-all.sh 聚合调用；本脚本默认无交互确认，--yes 为兼容参数）
 #   默认：删除 OCR 相关的全部——systemd 服务单元与 enable、运行进程、venv
 #         （rapidocr_onnxruntime/onnxruntime 等全部 pip 依赖 + 内置模型）、
 #         模型缓存（~/.cache/rapidocr*、$OCR_DIR/models*、首次运行提取位置）、
@@ -19,7 +20,8 @@ KEEP_MODELS=0
 for arg in "$@"; do
   case "$arg" in
     --keep) KEEP_MODELS=1 ;;
-    *) echo "未知参数: $arg（支持 --keep）" >&2; exit 1 ;;
+    --yes) : ;;   # 接口对齐（uninstall-all.sh 聚合调用带 --yes；本脚本无交互确认，接受即忽略）
+    *) echo "未知参数: $arg（支持 --keep / --yes）" >&2; exit 1 ;;
   esac
 done
 
