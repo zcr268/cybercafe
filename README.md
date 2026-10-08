@@ -66,6 +66,13 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 4. 设备列表自动出现该实例（带「批次」来源标签），批次卡实时展示用量（used/quota，无限显示 ∞，满/过期自动标红）
 
 - 单机直装也可用批次模式：`PROVISION_API_BASE=<域名> bash install.sh --batch <批次码>`（或 `PROVISION_CODE` 环境变量）；现有单机模式（`?key=` 注入）完全不受影响。
+- **批次一键安装命令（v0.3.9 起，批次卡自带「复制命令」）**：目标机（裸机、无 install.sh）直贴执行——
+  ```bash
+  curl -fsSL 'https://cybercafe.akkak.kdns.fr/install.sh?batch=<批次码>' | bash -s -- --batch <批次码> --api-base https://cybercafe.akkak.kdns.fr
+  ```
+  语义：`?batch=` 下发**原始** install.sh（不注入参数）→ `--batch` 进入批次模式 → 云端
+  `/api/device/provision` 按 machine-id 颁发 cck- 设备密钥并安装 agent。命令中 API 地址取当前
+  访问域名（生产=固定域名，本地沙箱=当前 origin）。`--image-prep` 仍用于**镜像构建期**预置（见上）。
 - 批次配额：`POST /api/admin/batches` 的 `quota` 字段可选——不填/空 = 无限（KV `quota:null`，provision 跳过配额检查）；显式填数量才限（>=1 整数）。已建批次（明确 quota）语义不变。
 - KV key 约定：`batch:<code>`（label/quota/used/created/expires）、`prov:machine:<machine_id>`（key 映射）、`devicekey:<hash>`（沿用，新增 batch/machine_id 字段）。
 - 完整真机验收（打镜像→开实例→首启自动注册→配额/无限）由测试成员按 t9 执行。

@@ -463,17 +463,39 @@ async function handleAdminDeleteDevice(env, id) {
 
 // ---------- 脚本下发 ----------
 
+// 无 key 文件下发白名单（?batch= 一键装机命令场景：install.sh 原始脚本公开下发，
+// 批次模式自行领取 cck- key；provision.sh/service 供镜像预置/自包含命令取用）
+const INSTALL_EXTRA_ALLOW = new Set(["install.sh", "provision.sh", "cybercafe-provision.service"]);
+
 async function handleInstallSh(request, env, url) {
+  // ?key=<设备KEY>      → 单机安装：校验设备 key，注入 API_BASE/DEVICE_KEY
+  // ?batch=<批次码>     → 批次一键装机（裸机无脚本场景）：无需 key，下发原始 install.sh
+  //                       （占位符不注入，批次模式自行从 --api-base 参数 / provision API 取地址）
   const key = url.searchParams.get("key") || "";
-  if (!key) return new Response("missing ?key=\n", { status: 400 });
-  const rec = await env.CYBERCAFE_KV.get(`devicekey:${await sha256hex(key)}`);
-  if (!rec) return new Response("invalid device key\n", { status: 403 });
+  const batch = url.searchParams.get("batch") || "";
+  if (!key && !batch) return new Response("missing ?key= or ?batch=\n", { status: 400 });
+  if (key) {
+    const rec = await env.CYBERCAFE_KV.get(`devicekey:${await sha256hex(key)}`);
+    if (!rec) return new Response("invalid device key\n", { status: 403 });
+  }
   try {
     const src = await fetchRepoFile(env, "install.sh");
-    const body = injectParams(src, publicOrigin(request, url), key);
+    const body = key ? injectParams(src, publicOrigin(request, url), key) : src;
     return new Response(body, { headers: { "Content-Type": "text/x-shellscript; charset=utf-8" } });
   } catch (e) {
     return new Response(`fetch install.sh failed: ${e.message}\n`, { status: 502 });
+  }
+}
+
+async function handleInstallExtra(env, url) {
+  // 白名单内部文件下发（镜像预置/一键装机命令在裸环境取配套文件；agent/ 文件本身公开）
+  const name = url.searchParams.get("name") || "";
+  if (!INSTALL_EXTRA_ALLOW.has(name)) return json({ error: "not allowed" }, 403);
+  try {
+    const src = await fetchRepoFile(env, name);
+    return new Response(src, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  } catch (e) {
+    return json({ error: `fetch ${name} failed: ${e.message}` }, 502);
   }
 }
 
@@ -503,9 +525,13 @@ export default {
     const path = url.pathname;
 
     try {
-      // 安装脚本（key 在 query 中）
+      // 安装脚本（?key= 单机注入 / ?batch= 批次一键装机原始下发）
       if (path === "/install.sh" && request.method === "GET")
         return await handleInstallSh(request, env, url);
+
+      // 白名单内部文件下发（镜像预置/一键装机配套文件，公开）
+      if (path === "/install-extra" && request.method === "GET")
+        return await handleInstallExtra(env, url);
 
       // 设备侧
       // provision：无 X-Device-Key 鉴权——批次码即装机凭证（基础镜像首启自动注册）
