@@ -99,3 +99,46 @@
 - 分支：`release-2026-10`（本地 + GitHub 远程分支，未触碰 main）；新 HEAD = `1375775`
 - **未推 GitHub main**（`git log origin/main -1` 仍为 15a89d1）；未 sync aliyun；未重建生产容器；未重启任何机器
 - 待用户放行后：合入 main → sync aliyun → 单次停机窗口全量部署（t35/t37/t39/t41/t45/t48/t49/t42/t28-fix 一并上线）
+
+---
+
+# 第三轮（t61，2026-10-09）：F1-R2 镜像零残留修复替换首轮过度删除版
+
+## 背景
+首轮（t58）合入的 F1 修复（131511a，`docker rmi -f <id>` 按 ID 强删）经 t29 对抗验收确认**中等缺陷**：
+同一镜像 ID 同时挂引擎 tag 与非引擎 tag（如 `docker tag ollama/ollama:latest mykeep/util:latest`）时，
+非引擎自定义 tag 被连带删光。开发测试修复版 F1-R2（t59 @ 2b190ea + 防御注释 6c83ba0），
+部署运维真机复验（t60，16721/XZ-31-002）verdict=pass 8/8 全过。
+
+## 合入记录
+- 基线：origin/release-2026-10 = f256fc2（t58 收口态：1375775 首轮合并 + f256fc2 文档）
+- 合入：origin/t28-fix-f1 @ 6c83ba0（含 2b190ea F1-R2 + 6c83ba0 防御注释）
+- 新 HEAD：`6517213`（Merge remote-tracking branch 'origin/t28-fix-f1'）
+- 祖先三证：941c54b（t51）/ 131511a（首轮 F1）/ 2b190ea（F1-R2）逐一 `is-ancestor` 通过
+
+## 冲突解法
+**零冲突**（ort 干净合并）：双方 uninstall-all.sh 均以 131511a 的 F1 为基底，2b190ea 的 F1→F1-R2 delta（33+/5-）直接应用；
+ocr/uninstall.sh（F2）不受本轮影响。无 -X 蒙混（内容即 F1-R2 最终形态）。
+
+## F1-R2 最终形态（uninstall-all.sh rm_images，自证）
+- 引擎匹配 tag 先收集（tag+ID，dry-run 口径=包含匹配识别 mirror 前缀 repo 不变）
+- 每 ID `docker inspect --format '{{range .RepoTags}}{{println .}}{{end}}'` 判定：
+  全部 RepoTag 皆引擎匹配（line 232 `all_engine` 检查）→ `full_ids` → `docker rmi -f <id>`（连带释放层，line 245）；
+  存在任一非引擎 tag → `shared_ids` → 仅 `docker rmi <tag>` untag 引擎 tag（line 236-237，非引擎层保留）
+- t59 防御注释（真 dangling 镜像 .RepoTags 返回 [] 的语义）在位（line 221）
+- **非首轮无脑 rmi -f 形态**（首轮路径已由本轮替换）
+
+## 验证结果（本轮全绿）
+| 项 | 结果 |
+|---|---|
+| 祖先三证（941c54b/131511a/2b190ea） | ANCESTRY-OK |
+| 冲突标记（git grep 全树） | 0 |
+| 语法门：node --check / py_compile（agent.py+deploy.py）/ bash -n 全部 .sh | SYNTAX-OK |
+| H3 双份逐字节一致 + sha256 前16 `b2b8d725d2c0192f` | H3-COPIES-IDENTICAL |
+| REGISTRY_MIRRORS daocloud-only + 探测机制未动；无 docker.1ms.run 字面量 | MIRROR-OK |
+| index.js 四关切：hw_source=5 / INSTALL_EXTRA_ALLOW=2（5 项白名单完整）/ cybercafe-deploy.py=1 / RETIRE_AFTER_S=3 | 完整保留 |
+| origin/main 未动 | 15a89d1 |
+| t59 自验 + t60 真机独立复验 | pass（DinD 共享/纯引擎/daocloud 前缀/dry-run/幂等/防御注释） |
+
+## 部署前对账（最终形态）
+release-2026-10 = 6517213，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t49/t42(OCR)/t28-F1-R2 全量合一。
