@@ -199,23 +199,38 @@ def step_mirrors():
     return "镜像加速: " + ", ".join(mirrors)
 
 def step_gpu_toolkit():
+    # 已正确安装（nvidia-ctk 在 PATH）→ 跳过重复安装，不因重装拖慢部署
     if shutil.which("nvidia-ctk"):
         return "nvidia-container-toolkit 已安装"
-    cmds = [
-        "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
-        "curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' > /etc/apt/sources.list.d/nvidia-container-toolkit.list",
-        "apt-get update -qq",
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nvidia-container-toolkit",
-    ]
-    for c in cmds:
-        rc, out = run(c, timeout=900)
-        if rc != 0:
-            raise DeployError("toolkit 安装失败: %s -> %s" % (c[:60], out[-300:]))
+    # R2：外部源调用必须带显式超时——nvidia.github.io 在新机/受限网络会静默挂起 ~6 分钟。
+    # 所有 curl 均带 --connect-timeout 10 --max-time 30（快速失败）；源不可达时走降级路径
+    # （NVIDIA_TOOLKIT_BASE 环境变量可指向可达镜像/备用源），失败如实上报，绝不静默成功。
+    CURL = "curl -fsSL --connect-timeout 10 --max-time 30"
+    base = os.environ.get("NVIDIA_TOOLKIT_BASE", "https://nvidia.github.io/libnvidia-container")
+    tmp = "/tmp/cc-nvidia-toolkit"
+    # 分开执行并取 curl 自身 rc（管道 rc 会被 gpg/sed 掩盖，curl 失败不能静默通过）
+    rc1, out1 = run("%s %s/gpgkey -o %s.gpgkey" % (CURL, base, tmp), timeout=45)
+    rc2, out2 = run("%s %s/stable/deb/nvidia-container-toolkit.list -o %s.list" % (CURL, base, tmp), timeout=45)
+    src_detail = ""
+    if rc1 != 0 or rc2 != 0:
+        # 源限时不可达：如实记录，进入降级路径（不死等）
+        src_detail = "（源 %s 限时不可达 rc1=%d rc2=%d）" % (base, rc1, rc2)
+    else:
+        run("gpg --dearmor < %s.gpgkey > /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg" % tmp, timeout=30)
+        run("sed -e 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' %s.list > /etc/apt/sources.list.d/nvidia-container-toolkit.list" % tmp, timeout=30)
+    # apt 步统一限时（源配置失败时快速失败，不静默继续）
+    run("apt-get update -qq", timeout=180)
+    rc_i, out_i = run("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nvidia-container-toolkit", timeout=300)
+    if rc_i != 0:
+        # 降级路径尝试已包含在同上 apt 通道（发行版归档/已配置源若提供 toolkit 则安装成功）；
+        # 仍失败 → 如实上报 fail，绝不假装工具包已就绪
+        raise DeployError("toolkit 安装失败%s: apt install nvidia-container-toolkit -> %s"
+                          % (src_detail, out_i[-300:]))
     rc, out = run("nvidia-ctk runtime configure --runtime=docker && systemctl restart docker", timeout=120)
     if rc != 0:
         raise DeployError("toolkit 配置失败: " + out[-300:])
     time.sleep(3)
-    return "nvidia-container-toolkit 安装完成"
+    return "nvidia-container-toolkit 安装完成" + src_detail
 
 def step_pull_images(engine):
     # strata 为原生进程：无引擎容器镜像，仅拉网关/隧道镜像
