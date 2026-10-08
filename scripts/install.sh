@@ -18,9 +18,23 @@
 #   - 运行时：stable-diffusion.cpp（leejet，Day-1 支持 MiniMax-H3，GGUF 原生）
 #   - 端口：sd-server 独立端口 11435（避开 ollama/vllm/sglang/strata 共用的 11434），
 #           nginx 网关不变；兼容 /v1/models 与 OpenAI API 形态，外部可再套 Key 网关。
+#   - GPU 放置语义（重要，勿误读日志）：
+#       本脚本固定使用 --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu。
+#       在该配置下，sd.cpp 日志 "total params memory size = ... (VRAM 0.00MB, RAM ...)" 中
+#       text_encoders ...(RAM) 表示【文本编码器参数常驻系统 RAM】（te=cpu 的预期行为），
+#       VRAM 0.00MB 只统计"参数驻留显存"，不代表 GPU 未参与计算；
+#       denoiser/VAE 参数在 --offload-to-cpu 下同样先驻 RAM、计算时按段流式上 cuda0，
+#       GPU 真实使用以 NVML 采样为据（t48 真机实测：峰值显存 8.99GB、利用率 100%）。
+#       源码依据（leejet/stable-diffusion.cpp src/pipeline/diffusion_engine.cpp）：
+#         L1316  return sd_backend_is_cpu(module_backend) ? "RAM" : "VRAM";
+#         L1329  "total params memory size = %.2fMB (VRAM %.2fMB, RAM %.2fMB): ..."
+#       —— 组件标签按 params_backend 是否 CPU 后端返回 "RAM"/"VRAM"，
+#          te=cpu → "RAM"（参数在 RAM），diffusion/vae=cuda0 运行时流式上卡。
 # -----------------------------------------------------------------------------
 # 用法:  bash install.sh            # 默认档（UD-Q2_K_XL，sd.cpp 兼容最小档）
-#        H3_QUANT=Q4_K_M bash install.sh   # 更高档（11.4GB，16GB 卡平衡档）
+#        H3_QUANT=Q4_K_M bash install.sh   # 16GB 卡推荐平衡档（11.4GB denoiser）
+#        H3_QUANT=Q5_0 bash install.sh     # 可选更高档（13.0GB denoiser）
+#        H3_QUANT=UD-Q3_K_XL bash install.sh # 可选（8.9GB，质量/速度均衡）
 #        H3_SERVER=0 bash install.sh # 只装模型+CLI 验证，不常驻 HTTP 服务
 # 卸载:  bash uninstall.sh
 # =============================================================================

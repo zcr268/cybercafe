@@ -11,12 +11,12 @@
 | 开源 | 是（MIT 社区许可 MiniMax H3 Community License，权重与推理代码开源；Context-IR/2K 再生模块托管未开放） | [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) |
 | 参数量/架构 | H3-Omni-Transformer **33B** dense + H3-Encoder = **Qwen3-VL-32B**（取 50 层 hidden）+ VisualVAE(f16t4d24) + AudioVAE(40Hz) | [架构文档](https://huggingface.co/MiniMaxAI/MiniMax-H3#model-architecture) |
 | 格式 | 官方 BF16 safetensors（SGLang 推荐 4×GPU / vLLM / diffusers / ComfyUI）；社区 GGUF 量化可用 | [官方仓库](https://huggingface.co/MiniMaxAI/MiniMax-H3) |
-| HF 地址 | `MiniMaxAI/MiniMax-H3`（官方）、`Abiray/MiniMax-H3-Pruned-GGUF`（pruned 消费卡档）、`Abiray/MiniMax-H3-GGUF`（text encoder+VAE）、`leejet/MiniMax-H3-GGUF`（sd.cpp 作者档） | [HF](https://huggingface.co/Abiray/MiniMax-H3-Pruned-GGUF) |
-| 下载体积 | 最小档（Q3_K_M pruned）≈ **29GB**：扩散 8.9GB + 文本编码器 14.6GB + 视频 VAE 5.2GB + 音频 VAE 0.6GB | 本调研（hf-mirror API 实测 200） |
-| 目标机（16GB 显存/31.2GB 内存）可行性 | ✅ **可行（最小档）**：官方 pruned 档面向消费卡，Q3_K_M=8.9GB（~12GB 卡）、Q4_K_M=11.6GB（推荐 16GB 卡）；31GB 内存装 Q4 编码器+CPU offload 可行 | [Pruned-GGUF](https://huggingface.co/Abiray/MiniMax-H3-Pruned-GGUF) |
+| HF 地址 | `MiniMaxAI/MiniMax-H3`（官方）、`unsloth/MiniMax-H3-GGUF`（sd.cpp 兼容 denoiser+编码器，本脚本默认源）、`leejet/MiniMax-H3-GGUF`（sd.cpp 作者档）、`Comfy-Org/MiniMax-H3`（VAE）；⚠️ `Abiray/MiniMax-H3-Pruned-GGUF` 为 ComfyUI-GGUF 布局，sd.cpp 加载报 `model metadata validation failed`，本脚本**不使用**（t48 真机实测） | [unsloth](https://huggingface.co/unsloth/MiniMax-H3-GGUF) |
+| 下载体积 | 最小档（UD-Q2_K_XL）≈ **27GB**：denoiser 8.06GB + 文本编码器 Q2_K_M 13.1GB + 视频 VAE 5.2GB + 音频 VAE 0.6GB | 本调研（hf-mirror API 实测 206） |
+| 目标机（16GB 显存/31.2GB 内存）可行性 | ✅ **可行（UD-Q2_K_XL 默认档）**：denoiser 8.06GB 可上卡、文本编码器 Q2_K_M 13.1GB 留 CPU（31GB 内存够）、峰值显存实测 ~9GB（t48 NVML）；16GB 卡平衡档 Q4_K_M（11.4GB denoiser）亦可 | [unsloth](https://huggingface.co/unsloth/MiniMax-H3-GGUF) |
 | 运行时 | stable-diffusion.cpp（[leejet](https://github.com/leejet/stable-diffusion.cpp)，Day-1 支持 MiniMax-H3、GGUF 原生、有 sd-server HTTP 服务） | [sd.cpp minimax_h3.md](https://github.com/leejet/stable-diffusion.cpp/blob/master/docs/minimax_h3.md) |
 
-**最小可行档**：`MiniMax-H3-FL2VA-Pruned-Q3_K_M.gguf`（8.9GB，12GB 显卡档；16GB 卡平衡档 Q4_K_M 11.6GB），文本编码器 `qwen3vl_32b_minimax_h3-Q4_K_M.gguf`。
+**最小可行档**：`minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf`（8.06GB denoiser，unsloth）+ `qwen3vl_32b_minimax_h3-Q2_K_M.gguf`（13.1GB 编码器，留 CPU）——t48 真机实测 GPU 运行（102.65s/25帧 vs 纯 CPU 940s）。
 
 ## 2. 部署形态
 
@@ -28,12 +28,11 @@
 ## 3. 使用
 
 ```bash
-# 安装（默认最小档 Q3_K_M；16GB 平衡档）：
-bash scripts/install.sh                 # 默认 Q3_K_M（CUDA 编译 + GPU 推理）
-H3_QUANT=Q4_K_M bash scripts/install.sh # 16GB 推荐平衡档
-H3_QUANT=UD-Q2_K_XL bash scripts/install.sh  # 极低配兜底档：unsloth UD-Q2_K_XL（8.06GB denoiser
-                                            # + Q2_K_M 13.1GB 编码器），全 CPU offload 也可跑
-                                            # （约 940s/25 帧量级），适合无 CUDA 编译环境的机器
+# 安装（默认档 UD-Q2_K_XL，sd.cpp 兼容最小档；16GB 卡平衡档 Q4_K_M）：
+bash scripts/install.sh                          # 默认 UD-Q2_K_XL（CUDA 编译 + GPU 推理）
+H3_QUANT=Q4_K_M bash scripts/install.sh          # 16GB 卡推荐平衡档（11.4GB denoiser）
+H3_QUANT=Q5_0 bash scripts/install.sh            # 可选更高档（13.0GB denoiser）
+H3_QUANT=UD-Q3_K_XL bash scripts/install.sh      # 可选（8.9GB，质量/速度均衡）
 
 # 冒烟验证自动化：install.sh 内置「文本→视频+音频」真实生成（640x384/25帧/4步）
 # 产物：/opt/minimax-h3/smoke_test.webm；HTTP：http://127.0.0.1:11435/v1/models → 200
@@ -48,6 +47,19 @@ curl -s -X POST http://127.0.0.1:11435/sdcpp/v1/vid_gen \
 bash scripts/uninstall.sh
 ```
 
+> **如何读 sd.cpp 日志里的 `VRAM 0.00MB`（重要，勿误判为"没在用 GPU"）**：
+> 脚本固定使用 `--backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu`。
+> 在此配置下，sd.cpp 启动日志
+> `total params memory size = 25828.96MB (VRAM 0.00MB, RAM 25828.96MB): text_encoders 12497MB(RAM), diffusion_model 7774MB(RAM), vae 5558MB(RAM), ...`
+> 统计的是**每个组件的「参数常驻位置」**——`--offload-to-cpu` 语义为参数先驻系统 RAM、计算时按需流式送 GPU（backend.md 的 offloaded/分段机制）。因此：
+> - `text_encoders ...(RAM)` = 文本编码器参数常驻 RAM（`te=cpu` 的预期行为，12GB 编码器不占 16GB 显存）；
+> - `VRAM 0.00MB` = **没有任何组件把参数常驻显存**，这不代表 GPU 未参与计算——denoiser/VAE 在 cuda0 上流式计算，参数按段上卡；
+> - GPU 是否被使用的判据以 **NVML 独立采样**为准（t48 真机实测：空闲基线 1MB → 生成峰值 8986MB 显存、利用率 20 次非零、峰值 util_gpu=100%）。
+> **源码依据**：leejet/stable-diffusion.cpp `src/pipeline/diffusion_engine.cpp`：
+> L1316 `return sd_backend_is_cpu(module_backend) ? "RAM" : "VRAM";`
+> L1329 `"total params memory size = %.2fMB (VRAM %.2fMB, RAM %.2fMB): ..."`——
+> 组件标签（RAM/VRAM）按 `params_backend_for(module)` 是否 CPU 后端返回，te=cpu → "RAM"（参数在 RAM），diffusion/vae=cuda0 运行时流式上卡。
+
 > **Vulkan 预编译版为什么不采用**：leejet/stable-diffusion.cpp release 确有 Linux Vulkan 预编译资产
 > （35.2MB，零编译即可跑），且 NVIDIA 卡有 Vulkan ICD；但 MiniMax-H3 是 2026-08 才加入的新模型，
 > **16GB Vulkan 后端当前不可用**——[issue #1976](https://github.com/leejet/stable-diffusion.cpp/issues/1976)
@@ -59,7 +71,7 @@ bash scripts/uninstall.sh
 > **与仓库内历史版本（main@5f683c7，dev3）的关系**：main 上 `minimax-h3/` 目录为 dev3 2026-10-03 交付的
 > **早期版本**（预编译 CPU 二进制 + Q2 档，真机实测 `VRAM 0.00MB / te=cpu,diffusion=cpu,vae=cpu`，
 > 940s/25 帧）。本目录（/tmp/cybercafe-h3，引擎开发 2026-10-08）为其 **GPU 升级版**：
-> 源码编译 CUDA + gcc-12 隔离 + 独立端口 11435 + 多档支持（Q3_K_M…Q5_K_M/UD-Q2_K_XL）。
+> 源码编译 CUDA + gcc-12 隔离 + 独立端口 11435 + 多档支持（UD-Q2_K_XL/UD-Q3_K_XL/Q4_K_M/Q5_0）。
 > 合并方向：**以本版为基底**，dev3 版保留作历史证据并标注 superseded。
 
 ## 4. 卸载清理范围（uninstall.sh）
