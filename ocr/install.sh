@@ -43,9 +43,35 @@ echo "[cybercafe-ocr] 安装开始: 目录=$OCR_DIR 端口=$PORT 源=$PIP_INDEX"
 mkdir -p "$OCR_DIR"
 
 # ---------- 1) Python venv + 依赖（国内源） ----------
-if [ ! -x "$OCR_DIR/venv/bin/python" ]; then
-    echo "[cybercafe-ocr] 创建 venv ..."
-    python3 -m venv "$OCR_DIR/venv"
+# venv 探针必须用 ensurepip：`python3 -c "import venv"` 在缺 python3-venv 包的真机上会假阳性
+# 通过，但 `python3 -m venv` 仍因 ensurepip 缺失失败（真机 Ubuntu 24.04 实测，两台均缺包）。
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+    echo "[cybercafe-ocr] python3-venv/ensurepip 缺失，尝试自动安装 ..."
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv || true
+    else
+        echo "[cybercafe-ocr] 未找到 apt-get，跳过自动安装"
+    fi
+fi
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+    echo "[cybercafe-ocr] ERROR: ensurepip 仍不可用。请手动安装 python3-venv 后重跑：" >&2
+    echo "    apt-get install -y python3-venv" >&2
+    echo "  备选（详见 ocr/README.md）：python3 -m venv --system-site-packages 或用户级 pip（--user）" >&2
+    exit 1
+fi
+# 双守卫：bin/python 与 bin/pip 都必须可执行。venv 创建失败会残留「有 python 无 pip」的半残
+# 目录——旧守卫只看 bin/python 会误判「已就绪」、再撞不存在的 pip；此处先清残再重建保证重跑自愈。
+if [ ! -x "$OCR_DIR/venv/bin/python" ] || [ ! -x "$OCR_DIR/venv/bin/pip" ]; then
+    echo "[cybercafe-ocr] 创建 venv（半残残留自动清理）..."
+    rm -rf "$OCR_DIR/venv"
+    python3 -m venv "$OCR_DIR/venv" || true
+fi
+if [ ! -x "$OCR_DIR/venv/bin/pip" ]; then
+    echo "[cybercafe-ocr] ERROR: venv 创建失败（$OCR_DIR/venv/bin/pip 不存在）。" >&2
+    echo "  请确认 python3-venv 已安装后重跑：apt-get install -y python3-venv" >&2
+    rm -rf "$OCR_DIR/venv"   # 不留半残目录，下次重跑可自愈
+    exit 1
 fi
 echo "[cybercafe-ocr] 安装 rapidocr_onnxruntime（含内置模型）..."
 "$OCR_DIR/venv/bin/pip" install --no-input -q -i "$PIP_INDEX" --upgrade rapidocr_onnxruntime
@@ -96,7 +122,7 @@ fi
 # ---------- 4) 服务就绪确认（服务 active 即安装成功；health=模型提取完成的尽力等待） ----------
 echo "[cybercafe-ocr] 等待服务启动（首次运行提取模型可能较久）..."
 WAITED=0
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     if [ "$HAS_SYSTEMD" = "1" ] && systemctl is-active --quiet ${SERVICE}.service; then
         echo "[cybercafe-ocr] ✅ 服务已启动（systemd Restart=always 兜底）"
         break
@@ -109,7 +135,7 @@ for i in $(seq 1 30); do
     WAITED=$((WAITED+2))
 done
 OK=0
-for j in $(seq 1 45); do
+for _ in $(seq 1 45); do
     if curl -s --max-time 5 "http://127.0.0.1:$PORT/health" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
         echo "[cybercafe-ocr] ✅ 服务健康: http://127.0.0.1:$PORT/health"
         OK=1

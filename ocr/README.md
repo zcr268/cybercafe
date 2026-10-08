@@ -23,6 +23,12 @@ bash install.sh --port 9900 --index https://mirrors.aliyun.com/pypi/simple/
 
 安装完成自动：venv + rapidocr → systemd 单元（无 systemd 的环境自动退化为后台进程模式，pidfile 在 `$OCR_DIR/ocr.pid`）→ 启动 → 健康检查（首次运行提取模型 10-60s）。
 
+### 依赖要求（Ubuntu 真机）
+
+- 需要 `python3-venv`（ensurepip）：Ubuntu 24.04 默认可能缺失（真机实测 `python3 -m venv` 报 "ensurepip is not available"）。install.sh 会自动 `apt-get install -y python3-venv`（探针用 `python3 -c "import ensurepip"` 可靠检出，`import venv` 会假阳性）；
+- 若自动安装失败（无 apt / 装不上），脚本会给出指引后退出：手动 `apt-get install -y python3-venv` 后重跑；备选方案：`python3 -m venv --system-site-packages` 复用系统包，或改用用户级 pip（`pip install --user`）；
+- venv 半残残留（有 bin/python 无 bin/pip）会自动清理重建（双守卫校验 bin/python 与 bin/pip），重跑即可自愈。
+
 ## 使用
 
 ```bash
