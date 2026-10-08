@@ -196,7 +196,7 @@ rm_containers() {
 
 rm_images() {
   say "=== 4/8 删除引擎镜像 ==="
-  local img repo r id ids=() removed=0
+  local img repo r id repo_tags t rt matched tag_ids=() full_ids=() shared_ids=() untag_tags=() removed=0
   for img in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); do
     repo="${img%%:*}"
     for r in "${ENGINE_IMAGE_REPOS[@]}"; do
@@ -205,15 +205,43 @@ rm_images() {
       case "$repo" in
         *"$r"*)
           id="$(docker inspect --format '{{.Id}}' "$img" 2>/dev/null)"
-          case " ${ids[*]:-} " in
-            *" $id "*) ;; *) [ -n "$id" ] && ids+=("$id") ;;
+          [ -n "$id" ] || break
+          untag_tags+=("$img")              # 引擎匹配的 tag（可能与其他 tag 共享同一镜像 ID）
+          case " ${tag_ids[*]:-} " in
+            *" $id "*) ;; *) tag_ids+=("$id") ;;
           esac
           removed=1; break ;;
       esac
     done
   done
-  # 按镜像 ID 删除：连带删除该镜像全部 tag（含 mirror 前缀 tag），镜像层才真正释放磁盘
-  for id in "${ids[@]:-}"; do
+  # 按 ID 判定「全部 RepoTag 皆引擎匹配」才 rmi -f（F1-R2 对抗：同一 ID 同时挂引擎与非引擎
+  # tag 时，非引擎 tag 的层必须保留——只 untag 引擎 tag，不删整个 ID）
+  for id in "${tag_ids[@]:-}"; do
+    repo_tags="$(docker inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$id" 2>/dev/null)"
+    # 防御备注（Docker 语义核实，t59）：真 dangling 镜像的 .RepoTags 返回空数组 []（'<none>' 仅为
+    # docker images 显示形态）；此类 ID 无法经 pass-1 引擎 tag 匹配进入本判定，故空数组按 all_engine
+    # 处理无副作用（真 dangling 的释放由脚本保留的悬空 prune 兜底，部署运维真机实测 1→0）。
+    all_engine=1
+    while IFS= read -r t; do
+      [ -z "$t" ] && continue
+      rt="${t%%:*}"
+      matched=0
+      for r in "${ENGINE_IMAGE_REPOS[@]}"; do
+        case "$rt" in *"$r"*) matched=1; break ;; esac
+      done
+      [ "$matched" = 0 ] && { all_engine=0; break; }   # 存在非引擎 tag → 仅 untag 路径
+    done <<< "$repo_tags"
+    if [ "$all_engine" = 1 ]; then full_ids+=("$id"); else shared_ids+=("$id"); fi
+  done
+  # 共享 ID：仅 untag 引擎匹配的 tag（非引擎 tag 的层保留）
+  for t in "${untag_tags[@]:-}"; do
+    id="$(docker inspect --format '{{.Id}}' "$t" 2>/dev/null)"
+    for sid in "${shared_ids[@]:-}"; do
+      [ "$id" = "$sid" ] && { run "docker rmi '$t' 2>/dev/null || true"; break; }
+    done
+  done
+  # 全 tag 皆引擎的 ID：rmi -f 连带释放镜像层
+  for id in "${full_ids[@]:-}"; do
     [ -n "$id" ] && run "docker rmi -f '$id' 2>/dev/null || true"
   done
   # 悬空镜像（引擎多阶段拉取的 <none> 残留）
