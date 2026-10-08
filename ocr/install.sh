@@ -110,7 +110,7 @@ for i in $(seq 1 30); do
 done
 OK=0
 for j in $(seq 1 45); do
-    if curl -s --max-time 5 "http://127.0.0.1:$PORT/health" | grep -q '"ok":true'; then
+    if curl -s --max-time 5 "http://127.0.0.1:$PORT/health" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
         echo "[cybercafe-ocr] ✅ 服务健康: http://127.0.0.1:$PORT/health"
         OK=1
         break
