@@ -170,10 +170,13 @@ $("btnBatch").onclick = async () => {
   try {
     const j = await api("/api/admin/batches", { method: "POST", body: JSON.stringify(body) });
     toast("批次码已生成: " + j.code);
+    const cmd = imagePrepCmd(j.code);
     $("batchHint").innerHTML = `新批次 <b class="mono">${esc(j.code)}</b>（配额 ${j.quota == null ? "∞ 无限" : j.quota}${j.expires ? "，有效期至 " + new Date(j.expires*1000).toLocaleString() : ""}）已生成。<br>
-      镜像预置一条命令：<span class="mono">bash install.sh --image-prep --batch ${esc(j.code)} --api-base &lt;云管理地址&gt;</span><br>
-      （等价手工步骤：写 <span class="mono">/etc/cybercafe/batch.code</span> + <span class="mono">/etc/cybercafe/api_base</span>，预置 <span class="mono">agent/provision.sh</span> + <span class="mono">cybercafe-provision.service</span> 并 enable）
-      实例首次开机自动向 /api/device/provision 注册并领取 cck- 设备密钥，无需逐台执行安装命令。`;
+      <div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <input readonly class="mono" style="flex:1;min-width:240px;background:#0f172a;color:#7dd3fc;border:1px solid #475569;border-radius:6px;padding:5px 8px;font-size:12px" value="${esc(cmd)}" id="newBatchCmd">
+        <button class="sm" onclick="copyCmd('${esc(j.code)}', this)">复制命令</button>
+      </div>
+      <div style="margin-top:6px">在镜像构建机的仓库 <span class="mono">agent/</span> 目录（install.sh/provision.sh/cybercafe-provision.service 同目录）直贴执行；实例首启自动向 /api/device/provision 注册并领取 cck- 设备密钥，无需逐台执行安装命令。</div>`;
     loadBatches();
   } catch (e) { toast(e.message, false); }
 };
@@ -190,11 +193,53 @@ async function loadBatches() {
         <td><span class="mono">${esc(b.code)}</span>${b.label ? `<br><span style="color:#64748b;font-size:11px">${esc(b.label)}</span>` : ""}</td>
         <td>${b.used}/${b.quota == null ? "∞" : b.quota} <span class="state ${cls}">${st}</span></td>
         <td>${b.expires ? new Date(b.expires*1000).toLocaleDateString() : "永久"}</td>
-        <td><button class="sm red" onclick="delBatch('${esc(b.code)}')">删除</button></td>
+        <td><div class="row">
+          <button class="sm" onclick="copyCmd('${esc(b.code)}', this)">复制命令</button>
+          <button class="sm red" onclick="delBatch('${esc(b.code)}')">删除</button>
+        </div></td>
       </tr>`;
     }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无批次。点「生成批次码」创建。</td></tr>`;
   } catch (e) { /* 401 由 api() 统一处理 */ }
 }
+
+// ---------- 批次一键命令（镜像预置）+ 复制 ----------
+// API_BASE 取当前访问域名（项目惯例：配置随请求来源下发；生产=固定域名，本地沙箱=当前 origin）
+function imagePrepCmd(code) {
+  return `bash install.sh --image-prep --batch ${code} --api-base ${location.origin}`;
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
+  document.body.removeChild(ta);
+  return Promise.resolve(ok);
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* 降级 */ }
+  return fallbackCopy(text);
+}
+
+window.copyCmd = async (code, btn) => {
+  const cmd = imagePrepCmd(code);
+  const ok = await copyText(cmd);
+  if (btn) {
+    btn.textContent = ok ? "已复制 ✓" : "复制失败";
+    setTimeout(() => { btn.textContent = "复制命令"; }, 1500);
+  }
+  toast(ok ? "镜像预置命令已复制，可在构建机 agent/ 目录直贴执行" : "复制失败，请手动选择命令文本", ok);
+};
 
 window.delBatch = async code => {
   if (!confirm(`删除批次 ${code}？\n已注册的设备记录与 agent 心跳不受影响（仅删除批次码，之后该码无法再 provision 新机）。`)) return;
