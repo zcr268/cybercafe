@@ -87,7 +87,9 @@ if [ "$gcc_v" -gt "$gcc_limit" ]; then
   for n in gcc g++ cc c++; do
     [ -e "$GCC_ISO/$n" ] || ln -sf "$(command -v "$n-$gcc_limit" || echo /usr/bin/$n-$gcc_limit)" "$GCC_ISO/$n"
   done
-  CUDA_ENV="PATH=$GCC_ISO:$CUDA_ENV"
+  # 把隔离目录插入 CUDA_ENV 的 PATH= 段前部（不能整体前缀：会产生 PATH=A:PATH=B 双前缀，
+  # env 解析会把第二个 PATH= 当命令参数，导致 CUDA bin 实际不进 PATH——t25 真机实测）
+  CUDA_ENV="PATH=$GCC_ISO:${CUDA_ENV#PATH=}"
 fi
 
 # ------------------------- 2. 克隆并编译 stable-diffusion.cpp -------------------------
@@ -104,7 +106,11 @@ fi
 cd "$SDCPP_DIR"
 mkdir -p build && cd build
 if [ ! -f bin/sd-cli ]; then
-  env $CUDA_ENV cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 >/dev/null
+  # 显式指定 nvcc 与 arch：避免 PATH 注入顺序/子进程环境差异导致 CMake 找不到 CUDA 编译器
+  NVCC_BIN=""
+  for c in /usr/local/cuda/bin/nvcc /usr/local/cuda-12.2/bin/nvcc; do [ -x "$c" ] && NVCC_BIN="$c" && break; done
+  env $CUDA_ENV cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON \
+      -DCMAKE_CUDA_COMPILER="$NVCC_BIN" -DCMAKE_CUDA_ARCHITECTURES=89 >/dev/null
   env $CUDA_ENV cmake --build . -j"$(nproc)" >/dev/null
 fi
 [ -x bin/sd-cli ] || die "sd-cli 编译失败，见 $LOG"
