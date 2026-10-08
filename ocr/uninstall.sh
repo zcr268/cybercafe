@@ -12,7 +12,7 @@
 #         请保留 install.sh 与 ocr.py（均随仓库 ocr/ 提供），重装即还原。
 set -euo pipefail
 
-OCR_DIR="/opt/cybercafe-ocr"
+OCR_DIR="${OCR_DIR:-/opt/cybercafe-ocr}"
 SERVICE="cybercafe-ocr"
 KEEP_MODELS=0
 
@@ -23,9 +23,15 @@ for arg in "$@"; do
   esac
 done
 
-if [ "$(id -u)" != "0" ]; then
-    echo "[cybercafe-ocr] ERROR: 需要 root 运行" >&2
-    exit 1
+# ---------- 1) 停服务 + 删 systemd 单元（仅当存在 systemd 且确需 root；沙箱目录免 root） ----------
+if command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
+    if systemctl list-unit-files 2>/dev/null | grep -q "${SERVICE}.service"; then
+        systemctl stop ${SERVICE}.service 2>/dev/null || true
+        systemctl disable ${SERVICE}.service 2>/dev/null || true
+    fi
+    rm -f /etc/systemd/system/${SERVICE}.service \
+          /etc/systemd/system/multi-user.target.wants/${SERVICE}.service
+    systemctl daemon-reload 2>/dev/null || true
 fi
 
 echo "[cybercafe-ocr] 卸载开始 (keep_models=$KEEP_MODELS)..."
@@ -39,7 +45,11 @@ rm -f /etc/systemd/system/${SERVICE}.service \
       /etc/systemd/system/multi-user.target.wants/${SERVICE}.service
 systemctl daemon-reload 2>/dev/null || true
 
-# ---------- 2) 清理运行进程（兜底） ----------
+# ---------- 2) 清理运行进程（pidfile + 兜底 pkill） ----------
+if [ -f "$OCR_DIR/ocr.pid" ]; then
+    kill "$(cat "$OCR_DIR/ocr.pid")" 2>/dev/null || true
+    rm -f "$OCR_DIR/ocr.pid"
+fi
 pkill -f "$OCR_DIR/ocr.py" 2>/dev/null || true
 pkill -f "ocr.py --serve" 2>/dev/null || true
 
