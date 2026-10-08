@@ -20,6 +20,37 @@ BATCH_CODE="${PROVISION_CODE:-}"
 IMAGE_PREP=""
 IMAGE_ROOT=""
 
+# 硬件指纹（与 provision.sh 同算法）：物理网卡 MAC 排序后 sha256 前 12 位；
+# 无物理网卡时回退 sha256(/etc/machine-id)。克隆换机（MAC 变）→ 指纹变 → 云端按指纹发新 key。
+hw_fingerprint() {
+  local macs=() dev name mac joined id
+  for dev in /sys/class/net/*; do
+    name="$(basename "$dev")"
+    case "$name" in
+      lo|docker*|veth*|br-*|virbr*|tun*|tap*|tailscale*|zt*|wg*|bond*|dummy*|sit*|ip6tnl*) continue ;;
+    esac
+    [ -f "$dev/address" ] || continue
+    mac="$(cat "$dev/address")"
+    [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ] || continue
+    macs+=("$mac")
+  done
+  if [ "${#macs[@]}" -gt 0 ]; then
+    joined="$(printf '%s\n' "${macs[@]}" | sort | paste -sd'|' -)"
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s' "$joined" | sha256sum | cut -c1-12
+    else
+      printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12
+    fi
+  else
+    id="$( { cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || hostname; } )"
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s' "$id" | sha256sum | cut -c1-12
+    else
+      printf '%s' "$id" | cksum | awk '{print $1}' | cut -c1-12
+    fi
+  fi
+}
+
 # 参数: --batch <code> | --image-prep | --api-base <url> | --root <dir>
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -85,6 +116,8 @@ mkdir -p "$INSTALL_DIR"
 # 批次模式：从 config.env（provision.sh 已写）或云端 provision API 取得 API_BASE/DEVICE_KEY
 if [ -n "$BATCH_CODE" ]; then
     echo "[cybercafe] 批次模式: batch=$BATCH_CODE"
+    HW_FP="$(hw_fingerprint)"
+    echo "[cybercafe] 硬件指纹: $HW_FP"
     if [ -f "$INSTALL_DIR/config.env" ]; then . "$INSTALL_DIR/config.env"; fi
     if [ -z "${API_BASE:-}" ] || [ "$API_BASE" = "$PH_API" ]; then
         API_BASE="${PROVISION_API_BASE:-}"
@@ -96,10 +129,10 @@ if [ -n "$BATCH_CODE" ]; then
     fi
     if [ -z "${DEVICE_KEY:-}" ] || [ "$DEVICE_KEY" = "$PH_KEY" ]; then
         MACHINE_ID="$(cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || echo "unknown-$(hostname)")"
-        echo "[cybercafe] 向云端申请设备密钥 (machine=$MACHINE_ID) ..."
+        echo "[cybercafe] 向云端申请设备密钥 (machine=$MACHINE_ID, fp=$HW_FP) ..."
         PROV_JSON="$(curl -sS --max-time 60 -X POST "$API_BASE/api/device/provision" \
             -H "Content-Type: application/json" \
-            -d "{\"batch_code\":\"$BATCH_CODE\",\"machine_id\":\"$MACHINE_ID\",\"device\":{\"hostname\":\"$(hostname | tr -d '"')\",\"os\":\"$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -1)\"}}" 2>&1 || true)"
+            -d "{\"batch_code\":\"$BATCH_CODE\",\"machine_id\":\"$MACHINE_ID\",\"hardware_id\":\"$HW_FP\",\"device\":{\"hostname\":\"$(hostname | tr -d '"')\",\"os\":\"$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -1)\"}}" 2>&1 || true)"
         DEVICE_KEY="$(echo "$PROV_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("device_key",""))' 2>/dev/null || true)"
         [ -z "$DEVICE_KEY" ] && { echo "[cybercafe] ERROR: 批次申请密钥失败: $PROV_JSON" >&2; exit 1; }
         RESP_API="$(echo "$PROV_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("api_base",""))' 2>/dev/null || true)"
@@ -133,7 +166,7 @@ echo "[cybercafe] 控制脚本版本: $AGENT_VER"
 cat > /etc/systemd/system/${SERVICE_NAME}.service << EOF
 [Unit]
 Description=CyberCafe Local Control Agent
-After=network-online.target docker.service
+After=network-online.target docker.service cybercafe-provision.service
 Wants=network-online.target
 
 [Service]
@@ -148,7 +181,45 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now ${SERVICE_NAME}.service
+systemctl enable ${SERVICE_NAME}.service
+# 克隆自愈场景（provision.sh 内调用本脚本，CYBERCAFE_FROM_PROVISION=1）时 provision 单元正在运行，
+# agent 的 After=cybercafe-provision.service 会让同步 start 与 provision 互相等待 → 死锁。
+# 故此时用 --no-block 异步启动（systemd 会在 provision 结束后按 ordering 自动拉起 agent）；
+# 其余场景保持同步启动语义不变。
+if [ "${CYBERCAFE_FROM_PROVISION:-}" = "1" ]; then
+    systemctl start --no-block ${SERVICE_NAME}.service
+else
+    systemctl start ${SERVICE_NAME}.service
+fi
+
+# 克隆机重装场景：enable/start 对已运行的 agent 不重启，必须显式 restart 让新 key/新代码生效
+if [ -n "$BATCH_CODE" ]; then
+    if [ "${CYBERCAFE_FROM_PROVISION:-}" = "1" ]; then
+        systemctl restart --no-block ${SERVICE_NAME}.service 2>/dev/null || true
+    else
+        systemctl restart ${SERVICE_NAME}.service 2>/dev/null || echo "[cybercafe] ⚠️ 服务重启失败，请检查: journalctl -u ${SERVICE_NAME} -n 20" >&2
+    fi
+fi
+
+# 批次模式：补装首启自检单元（换机开机自动注册/自愈；curl|bash 场景 $SCRIPT_DIR 不可靠 → 从云端拉）
+if [ -n "$BATCH_CODE" ]; then
+    provision_ok=1
+    curl -fsSL --max-time 30 "$API_BASE/install-extra?name=provision.sh" -o "$INSTALL_DIR/provision.sh" 2>/dev/null || provision_ok=0
+    curl -fsSL --max-time 30 "$API_BASE/install-extra?name=cybercafe-provision.service" -o /etc/systemd/system/cybercafe-provision.service 2>/dev/null || provision_ok=0
+    if [ "$provision_ok" = "1" ]; then
+        chmod 755 "$INSTALL_DIR/provision.sh"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload || true
+            systemctl enable cybercafe-provision.service >/dev/null 2>&1 || true
+        else
+            mkdir -p /etc/systemd/system/multi-user.target.wants
+            ln -sf /etc/systemd/system/cybercafe-provision.service /etc/systemd/system/multi-user.target.wants/cybercafe-provision.service
+        fi
+        echo "[cybercafe] ✅ 首启自检单元已安装（provision.sh + cybercafe-provision.service，每次开机自检/克隆自愈）"
+    else
+        echo "[cybercafe] ⚠️ 警告: 首启自检单元拉取失败（install-extra），镜像将缺少换机自动注册能力；请检查 $API_BASE/install-extra" >&2
+    fi
+fi
 
 sleep 3
 if systemctl is-active --quiet ${SERVICE_NAME}.service; then
@@ -161,11 +232,15 @@ BATCH_CODE='$BATCH_CODE'
 MACHINE_ID='$MACHINE_ID'
 EOF
         chmod 600 "$INSTALL_DIR/config.env"
-        echo "provisioned $(date -u +%Y-%m-%dT%H:%M:%SZ) batch=$BATCH_CODE machine=$MACHINE_ID" > "$INSTALL_DIR/.provisioned"
-        echo "[cybercafe] ✅ 批次注册完成（.provisioned 已写入，防止重复注册）"
+        echo "provisioned $(date -u +%Y-%m-%dT%H:%M:%SZ) batch=$BATCH_CODE machine=$MACHINE_ID fp=$HW_FP" > "$INSTALL_DIR/.provisioned"
+        echo "[cybercafe] ✅ 批次注册完成（.provisioned 已写入，含硬件指纹 fp=$HW_FP，防止重复注册/支持克隆自愈）"
     fi
     echo "[cybercafe] ✅ 安装完成，服务已启动（开机自启 + 崩溃自动重启 + 云端自更新）"
     echo "[cybercafe] 查看日志: journalctl -u ${SERVICE_NAME} -f"
+elif [ "${CYBERCAFE_FROM_PROVISION:-}" = "1" ]; then
+    # provision 场景：agent 的 start/restart 被 systemd ordering 排队到 provision 单元结束后执行，
+    # 健康检查窗口内可能尚未 active —— 属预期，不阻塞首启（marker 由 provision.sh 写入；agent 随后自动拉起）
+    echo "[cybercafe] ⚠️ agent 将在 provision 完成后自动启动（FROM_PROVISION 模式，健康检查放行）" >&2
 else
     echo "[cybercafe] ⚠️ 服务未正常启动，请查看: journalctl -u ${SERVICE_NAME} -n 50" >&2
     exit 1

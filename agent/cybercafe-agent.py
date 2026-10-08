@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.9"
+VERSION = "0.4.0"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -940,6 +940,130 @@ def cmd_restart_tunnel():
     heartbeat({"deploy": {"state": "online", "tunnel_url": url, "ts": int(time.time())}})
     return "隧道已重建: " + url
 
+# ---------------------------------------------------------------- 首启单元兜底（旧镜像救活，t33）
+
+BOOTSTRAP_INTERVAL = 600        # 每 10 分钟自检一次（不每心跳查）
+
+def _cfg_val(path, key):
+    """读 KEY=VALUE 配置（config.env 风格）；空/占位符视为无"""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith(key + "="):
+                    v = line.split("=", 1)[1].strip().strip("'\"")
+                    if v and not v.startswith("__"):
+                        return v
+    except Exception:
+        pass
+    return ""
+
+def _is_batch_machine():
+    """武装条件：批次/镜像机 = /etc/cybercafe/batch.code 存在 或 config.env 的 BATCH_CODE 非空
+    （旧版一键命令只写了 config.env 的 BATCH_CODE，两个都要读）"""
+    try:
+        with open("/etc/cybercafe/batch.code") as f:
+            if f.read().strip():
+                return True
+    except Exception:
+        pass
+    return bool(_cfg_val("/opt/cybercafe/config.env", "BATCH_CODE"))
+
+def _self_update_off():
+    """显式熄火开关：/etc/cybercafe/self_update 内容为 off 时全部跳过"""
+    try:
+        with open("/etc/cybercafe/self_update") as f:
+            return f.read().strip() == "off"
+    except Exception:
+        return False
+
+def _fetch_extra(name):
+    """拉云端 install-extra 白名单文件（公开，无需 key）；失败返回 None"""
+    req = urllib.request.Request(API_BASE.rstrip("/") + "/install-extra?name=" + name)
+    req.add_header("User-Agent", RAW_UA)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status != 200:
+                return None
+            return resp.read().decode("utf-8", "replace")
+    except Exception as e:
+        log("拉取 %s 失败: %s" % (name, e))
+        return None
+
+def _atomic_write(path, content, mode=0o644):
+    """原子写：临时文件 + os.replace，避免半截文件"""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(content)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        log("写 %s 失败: %s" % (path, e))
+        return False
+
+def _unit_enabled():
+    rc, _ = run("systemctl is-enabled cybercafe-provision.service", timeout=15)
+    return rc == 0
+
+def bootstrap_provision():
+    """旧镜像救活：批次/镜像机上补齐 provision.sh + 首启单元并当场触发一次注册。
+    - 非批次机（单机模式）→ 通道休眠：不替换任何文件、不 enable 任何单元，只打一行日志；
+    - 熄火开关 self_update=off → 全部跳过；
+    - 全程 fail-open：任一步失败仅警告，绝不阻塞 agent 启动。"""
+    if not _is_batch_machine():
+        if not bootstrap_provision._dormant_logged:
+            log("自更新通道未武装（非批次机），跳过")
+            bootstrap_provision._dormant_logged = True
+        return
+    if _self_update_off():
+        log("自更新熄火（/etc/cybercafe/self_update=off），跳过")
+        return
+    unit = "/etc/systemd/system/cybercafe-provision.service"
+    if os.path.exists("/opt/cybercafe/provision.sh") and os.path.exists(unit) and _unit_enabled():
+        return
+    log("检测到首启组件缺失（provision.sh/单元 缺失或未 enable），从云端补齐...")
+    src = _fetch_extra("provision.sh")
+    if src is None:
+        log("补齐 provision.sh 失败（fail-open，跳过本轮）")
+        return
+    if not _atomic_write("/opt/cybercafe/provision.sh", src, 0o755):
+        return
+    unit_src = _fetch_extra("cybercafe-provision.service")
+    if unit_src is not None:
+        _atomic_write(unit, unit_src, 0o644)
+    # 补齐批次码/API 地址（旧版一键命令只写了 config.env）
+    try:
+        os.makedirs("/etc/cybercafe", exist_ok=True)
+        bc = _cfg_val("/opt/cybercafe/config.env", "BATCH_CODE")
+        ab = _cfg_val("/opt/cybercafe/config.env", "API_BASE")
+        if bc and not os.path.exists("/etc/cybercafe/batch.code"):
+            _atomic_write("/etc/cybercafe/batch.code", bc + "\n", 0o644)
+        if ab and not os.path.exists("/etc/cybercafe/api_base"):
+            _atomic_write("/etc/cybercafe/api_base", ab + "\n", 0o644)
+    except Exception as e:
+        log("写批次码/API 失败: %s" % e)
+    # enable（无 systemd 用 wants symlink 兜底）+ daemon-reload
+    rc, out = run("systemctl enable cybercafe-provision.service", timeout=30)
+    if rc != 0:
+        try:
+            w = "/etc/systemd/system/multi-user.target.wants"
+            os.makedirs(w, exist_ok=True)
+            link = os.path.join(w, "cybercafe-provision.service")
+            if not os.path.islink(link):
+                os.symlink(unit, link)
+        except Exception as e:
+            log("enable 兜底失败: %s" % e)
+    run("systemctl daemon-reload", timeout=30)
+    # 当场触发一次 provision：让该机立即完成注册，而不是等下次开机
+    rc, out = run("systemctl start cybercafe-provision.service", timeout=60)
+    if rc == 0:
+        log("已当场触发首启注册（systemctl start cybercafe-provision.service ✓）")
+    else:
+        log("触发首启注册失败（rc=%s，fail-open）: %s" % (rc, out[-200:]))
+bootstrap_provision._dormant_logged = False
+
 # ---------------------------------------------------------------- 自更新
 
 def self_update(server_version):
@@ -995,9 +1119,13 @@ def main():
         if register():
             break
         time.sleep(10)
+    last_boot = 0.0            # 首启兜底：启动即检一次，此后每 10 分钟低频自检
     poll = HEARTBEAT_INTERVAL
     while True:
         try:
+            if time.time() - last_boot >= BOOTSTRAP_INTERVAL:
+                last_boot = time.time()
+                bootstrap_provision()
             js = heartbeat()
             if js:
                 self_update(js.get("agent_version"))

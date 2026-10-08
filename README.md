@@ -60,9 +60,9 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
    # --root <目录> 可指定目标根（构建器/临时目录 dry-run 验证用）
    ```
 3. 实例开机 → systemd oneshot 跑 `provision.sh`：
-   - 采集 `/etc/machine-id` 作为 `machine_id` → POST `/api/device/provision`（批次码为装机凭证）
-   - 云端校验批次有效：同一 `machine_id` 复用原 key（不耗配额）；显式限量的批次配额满时拒绝新机，无限批次（quota=null）不受限
-   - 返回 key+API 写入 `/opt/cybercafe/config.env` → 调用 `install.sh --batch` 装 agent → 写 `/opt/cybercafe/.provisioned` 防重复
+   - 采集硬件指纹（物理网卡 MAC 排序 sha256 前 12 位，见下节）与 `/etc/machine-id` → POST `/api/device/provision`（批次码为装机凭证，携带 `hardware_id`）
+   - 云端校验批次有效：同一指纹（`prov:hw`）/同 machine-id（兼容路径）复用原 key（不耗配额）；显式限量的批次配额满时拒绝新机，无限批次（quota=null）不受限
+   - 返回 key+API 写入 `/opt/cybercafe/config.env` → 调用 `install.sh --batch` 装 agent → 写 `/opt/cybercafe/.provisioned`（含 `fp=<指纹>`）防重复
 4. 设备列表自动出现该实例（带「批次」来源标签），批次卡实时展示用量（used/quota，无限显示 ∞，满/过期自动标红）
 
 - 单机直装也可用批次模式：`PROVISION_API_BASE=<域名> bash install.sh --batch <批次码>`（或 `PROVISION_CODE` 环境变量）；现有单机模式（`?key=` 注入）完全不受影响。
@@ -74,7 +74,41 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
   `/api/device/provision` 按 machine-id 颁发 cck- 设备密钥并安装 agent。命令中 API 地址取当前
   访问域名（生产=固定域名，本地沙箱=当前 origin）。`--image-prep` 仍用于**镜像构建期**预置（见上）。
 - 批次配额：`POST /api/admin/batches` 的 `quota` 字段可选——不填/空 = 无限（KV `quota:null`，provision 跳过配额检查）；显式填数量才限（>=1 整数）。已建批次（明确 quota）语义不变。
-- KV key 约定：`batch:<code>`（label/quota/used/created/expires）、`prov:machine:<machine_id>`（key 映射）、`devicekey:<hash>`（沿用，新增 batch/machine_id 字段）。
+- KV key 约定：`batch:<code>`（label/quota/used/created/expires）、`prov:machine:<machine_id>`（兼容旧路径）、`prov:hw:<hardware_id>`（t33 主去重键）、`devicekey:<hash>`（沿用，新增 batch/machine_id/hw_id 字段）。
+
+### 模板机 → 层镜像 → 换机自动注册（MAC 指纹绑定 + 克隆自愈，v0.4.0 / t33）
+
+用户目标：**一条命令装模板机 → 关机做层镜像 → 换一台机器开机自动「①首启 ②领码 ③装机 ④上线」**。
+
+- 模板机一键命令（t33 起，正常装机路径**末尾**会自动补装首启自检单元，无需 `--image-prep`）：
+  ```bash
+  curl -fsSL 'https://cybercafe.akkak.kdns.fr/install.sh?batch=<批次码>' | bash -s -- --batch <批次码> --api-base https://cybercafe.akkak.kdns.fr
+  ```
+  装机完成即：注册（带 `hardware_id=硬件指纹`）+ 写 `.provisioned`（含 `fp=<指纹>`）+ 安装
+  `provision.sh` / `cybercafe-provision.service`（每次开机自检）。
+- **硬件指纹算法**：枚举 `/sys/class/net/*/address` 物理网卡 MAC（排除 lo/docker*/veth*/br-*/virbr*/tun*/tap*/
+  tailscale*/zt*/wg*/bond*/dummy*/sit*/ip6tnl*），排序后 `sha256` 取前 12 位十六进制；
+  无物理网卡时回退 `sha256(/etc/machine-id)[:12]`（日志标注来源）。
+  - 实测背书（阿里云 ECS 同镜像双实例）：`product_uuid` 相同、MAC 不同 →「MAC 优先、machine-id 兜底」
+    是当前唯一可靠顺序；machine-id 与 product_uuid 同源（UUID 去横线），不能绕开克隆问题。
+- **开机判定（provision.sh，幂等毫秒级）**：
+  - marker 存在且 fp 一致 → 直接 exit 0（不联网、不消耗配额）；
+  - marker 存在但 fp 不一致 → **克隆自愈**：按新指纹重新领码（云端 `prov:hw` 去重）→ 重写
+    config.env（新 key）→ 重装 agent → 写新 marker，产生**独立第二台设备**，模板记录不受污染；
+  - marker legacy（无 fp=）→ 视为同机补写 fp，不重新领码（避免模板机重复消耗配额）；
+  - marker 不存在 → 走首启流程。
+- 云端去重：`prov:hw:<hardware_id>` 优先（同批次同指纹复用原 key、不消耗配额），`prov:machine:<machine_id>`
+  仅当 `hardware_id` 缺失时使用（兼容旧脚本/旧机器）；设备记录带 `hw_id` 字段。
+- **自更新通道（批次/镜像机才武装；`/etc/cybercafe/self_update` 内容为 `off` 可全部熄火）**：
+  - F：provision.sh 每次开机先拉云端最新版，hash 不同则原子替换并 `exec` 新副本（哨兵
+    `CYBERCAFE_PROV_REEXEC=1` 防递归，最多重跑一次）；拉取失败 fail-open 用本地副本；
+  - G：首启单元同法自更新 + `daemon-reload`（旧镜像甩掉 `ConditionPathExists` 的唯一途径）；
+  - H：装机一律取云端最新 `install.sh?key=`（注入新 key），失败才回退本地副本；
+  - ①：agent（v0.4.0）启动时及每 10 分钟低频自检——批次/镜像机上 provision.sh 或单元缺失/未 enable
+    时，从云端补齐并**当场触发一次** provision（救「用旧版一键命令做出的镜像」）；单机模式
+    （`?key=`，无 BATCH_CODE）通道休眠，不替换任何文件、不 enable 任何单元。
+- **⚠️ 已做过的镜像必须重做**：t33 之前的镜像（marker 无 fp / 无首启单元）不具备指纹绑定与克隆自愈；
+  旧镜像克隆会出现多台共用同一 device_id 的互相覆盖问题。请用 t33 之后的一键命令重做模板镜像。
 - 完整真机验收（打镜像→开实例→首启自动注册→配额/无限）由测试成员按 t9 执行。
 
 ## 推理引擎（v0.3.5 起支持四引擎）

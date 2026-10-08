@@ -1,9 +1,10 @@
-# 基础镜像首启 provision 单元（与 provision.sh 内置单元保持一致，镜像预置两者之一即可）
+# 基础镜像首启 provision 单元（每次开机自检；同机重启由 provision.sh 内部指纹幂等短路，
+# 不再用 ConditionPathExists 挡 marker——克隆机 marker 指纹不一致时必须能执行自愈）
 [Unit]
 Description=CyberCafe First Boot Provisioning
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=!/opt/cybercafe/.provisioned
+Before=cybercafe-agent.service
 
 [Service]
 Type=oneshot

@@ -258,13 +258,15 @@ async function handleProgress(request, env, dev) {
 // /api/device/provision 无 X-Device-Key 鉴权：批次码本身即装机凭证（镜像预置，首启自动注册）。
 // KV key 约定：
 //   batch:<code>            = {code, label, quota, used, created, expires}
-//   prov:machine:<machine>  = {key, batch, created_at}   machine_id → 设备 key（重复装机复用）
-//   devicekey:<hash>        = 沿用现有，新增 batch/machine_id 字段
+//   prov:machine:<machine>  = {key, batch, created_at, hw_id?}   machine_id → 设备 key（兼容旧路径）
+//   prov:hw:<hardware_id>   = {key, batch, created_at, machine_id}  硬件指纹 → 设备 key（t33 主去重键）
+//   devicekey:<hash>        = 沿用现有，新增 batch/machine_id/hw_id 字段
 
 async function handleDeviceProvision(request, env, url) {
   const body = await request.json().catch(() => ({}));
   const code = String(body.batch_code || "").trim();
   const machineId = String(body.machine_id || "").trim();
+  const hardwareId = String(body.hardware_id || "").trim();
   if (!code) return json({ error: "batch_code required" }, 400);
   if (!machineId) return json({ error: "machine_id required" }, 400);
   const now = Math.floor(Date.now() / 1000);
@@ -273,9 +275,10 @@ async function handleDeviceProvision(request, env, url) {
   const batch = await env.CYBERCAFE_KV.get(batchKey, "json");
   if (!batch) return json({ error: `batch ${code} not found` }, 403);
 
-  // 同一 machine_id 已在本批次注册过 → 复用原设备 key，不消耗配额、不受过期/配额限制；
-  // 仅限同批次复用，避免跨批次领取他人设备 key（machine_id 非机密）。
-  const mapKey = `prov:machine:${machineId}`;
+  // 去重键优先级：prov:hw:<hardware_id>（t33，克隆自愈按新指纹发新 key、同指纹复用不消耗配额）
+  // > prov:machine:<machine_id>（仅当 hardware_id 缺失时使用，兼容旧脚本/旧机器，不破坏既有记录）
+  const useHw = !!hardwareId;
+  const mapKey = useHw ? `prov:hw:${hardwareId}` : `prov:machine:${machineId}`;
   const mapped = await env.CYBERCAFE_KV.get(mapKey, "json");
   // provision 入参的硬件信息（hostname/os），用于预置设备记录；复用路径不强制要求
   const info = (body.device && typeof body.device === "object") ? body.device : {};
@@ -291,10 +294,17 @@ async function handleDeviceProvision(request, env, url) {
     if (batch.quota != null && (batch.used || 0) >= batch.quota) return json({ error: `batch ${code} quota full` }, 403);
     key = randKey("cck-");
     keyHash = await sha256hex(key);
+    const mappedRec = { key, batch: code, created_at: now, machine_id: machineId };
+    if (hardwareId) mappedRec.hw_id = hardwareId;
     await env.CYBERCAFE_KV.put(`devicekey:${keyHash}`,
       JSON.stringify({ label: String(info.hostname || "").slice(0, 120), batch: code,
-                       machine_id: machineId, created_at: now }));
-    await env.CYBERCAFE_KV.put(mapKey, JSON.stringify({ key, batch: code, created_at: now }));
+                       machine_id: machineId, ...(hardwareId ? { hw_id: hardwareId } : {}), created_at: now }));
+    await env.CYBERCAFE_KV.put(mapKey, JSON.stringify(mappedRec));
+    // 兼容：同时维护 machine 映射（旧路径去重继续可用；克隆换机后更新为最新 key）
+    if (hardwareId) {
+      await env.CYBERCAFE_KV.put(`prov:machine:${machineId}`,
+        JSON.stringify({ key, batch: code, created_at: now, machine_id: machineId, hw_id: hardwareId }));
+    }
     // 配额计数（KV 无原子自增；provision 为一次性首启行为，读改写可接受）
     batch.used = (batch.used || 0) + 1;
     await env.CYBERCAFE_KV.put(batchKey, JSON.stringify(batch));
@@ -309,6 +319,7 @@ async function handleDeviceProvision(request, env, url) {
     device_id: id,
     key_hash: keyHash,
     machine_id: machineId,
+    hw_id: hardwareId || (mapped && mapped.hw_id) || old.hw_id || "",
     batch: code,
     hostname: String(info.hostname || old.hostname || "").slice(0, 120),
     os: String(info.os || old.os || "").slice(0, 120),
@@ -398,12 +409,17 @@ async function handleAdminListBatches(env) {
 }
 
 async function handleAdminDeleteBatch(env, code) {
-  // 删除 batch:<code>；顺带清理该批次 prov:machine 映射（避免孤儿映射长期残留）。
+  // 删除 batch:<code>；顺带清理该批次 prov:machine / prov:hw 映射（避免孤儿映射长期残留）。
   // 已注册设备记录（device:<id>）保留——agent 心跳/部署不受影响，仅该码无法再 provision 新机。
   const rec = await env.CYBERCAFE_KV.get(`batch:${code}`, "json");
   await env.CYBERCAFE_KV.delete(`batch:${code}`);
   const keys = await kvListAll(env.CYBERCAFE_KV, "prov:machine:");
   for (const k of keys) {
+    const m = await env.CYBERCAFE_KV.get(k.name, "json");
+    if (m && m.batch === code) await env.CYBERCAFE_KV.delete(k.name);
+  }
+  const hwKeys = await kvListAll(env.CYBERCAFE_KV, "prov:hw:");
+  for (const k of hwKeys) {
     const m = await env.CYBERCAFE_KV.get(k.name, "json");
     if (m && m.batch === code) await env.CYBERCAFE_KV.delete(k.name);
   }
@@ -475,9 +491,10 @@ async function handleAdminDeleteDevice(env, id) {
   await env.CYBERCAFE_KV.delete(`cmd:${id}`);
   await env.CYBERCAFE_KV.delete(`log:${id}`);
   if (rec) {
-    // 连带吊销设备密钥（防止删除后旧 key 重新注册复活设备）与批次 machine 映射
+    // 连带吊销设备密钥（防止删除后旧 key 重新注册复活设备）与批次 machine/hw 映射
     if (rec.key_hash) await env.CYBERCAFE_KV.delete(`devicekey:${rec.key_hash}`);
     if (rec.machine_id) await env.CYBERCAFE_KV.delete(`prov:machine:${rec.machine_id}`);
+    if (rec.hw_id) await env.CYBERCAFE_KV.delete(`prov:hw:${rec.hw_id}`);
   }
   return json({ ok: true, removed: !!rec });
 }
