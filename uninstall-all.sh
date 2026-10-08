@@ -218,6 +218,9 @@ rm_images() {
   # tag 时，非引擎 tag 的层必须保留——只 untag 引擎 tag，不删整个 ID）
   for id in "${tag_ids[@]:-}"; do
     repo_tags="$(docker inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$id" 2>/dev/null)"
+    # 防御备注（Docker 语义核实，t59）：真 dangling 镜像的 .RepoTags 返回空数组 []（'<none>' 仅为
+    # docker images 显示形态）；此类 ID 无法经 pass-1 引擎 tag 匹配进入本判定，故空数组按 all_engine
+    # 处理无副作用（真 dangling 的释放由脚本保留的悬空 prune 兜底，部署运维真机实测 1→0）。
     all_engine=1
     while IFS= read -r t; do
       [ -z "$t" ] && continue
