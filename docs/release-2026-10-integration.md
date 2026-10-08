@@ -84,8 +84,18 @@
 - **t57** t40 缺陷#4 收口：修复在 t49/09b5a63，12 项 PASS
 - **t43** OCR venv 修复真机终验：9 项全过（复现/修复/自愈/systemd/无-apt/未越界/卸载/终态）
 
-## 7. 交付状态
+## 7. t58 第二轮整合：t28/t29 镜像零残留修复（131511a）
 
-- 分支：`release-2026-10`（本地 + GitHub 远程分支，未触碰 main）
+> 来源：t28-fix-f1 分支 @ `131511a`（t29 真机验收 16721 发现 F1 必修缺陷：uninstall-all.sh 镜像精确前缀匹配不识别 `docker.m.daocloud.io/` mirror 前缀 repo，卸载后残留 ~6G 引擎镜像；F2 ocr/uninstall.sh --yes 接口对齐）。
+
+- **合入提交**：`1375775`（merge commit，ort 策略无冲突）
+- **祖先链**：`git merge-base --is-ancestor 941c54b release-2026-10` ✓ + `131511a` ✓（131511a 的父 15a89d1 已在链上，原始提交作为祖先合入，非 cherry-pick 副本）
+- **F1 三处同口径**（uninstall-all.sh）：detect_items L117-120 / rm_images L203-218 / verify L293-300 均改包含匹配 `*"$r"*`（识别 daocloud mirror 前缀 repo）；删除改为**按镜像 ID**（`docker rmi -f '$id'`，连带镜像全部 tag 含 mirror 前缀 tag，层才真正释放）——t29 验收实测 Untagged 4 tag + Deleted 层、磁盘 21→16G
+- **F2**（ocr/uninstall.sh）：`--yes` 兼容参数（接口对齐 uninstall-all.sh 聚合调用，本脚本无交互确认，接受即忽略）
+- **验证（本轮重跑）**：冲突标记 0；node --check + py_compile（agent.py/deploy.py）+ bash -n 全部 sh 全过；minimax-h3/install.sh 与 scripts/install.sh 逐字节一致 sha `b2b8d725d2c0192f`；index.js 四关切（hw_source×5/INSTALL_EXTRA_ALLOW 完整 5 项/cybercafe-deploy.py/RETIRE_AFTER_S）全在；`origin/main` 仍 `15a89d1`
+
+## 8. 交付状态
+
+- 分支：`release-2026-10`（本地 + GitHub 远程分支，未触碰 main）；新 HEAD = `1375775`
 - **未推 GitHub main**（`git log origin/main -1` 仍为 15a89d1）；未 sync aliyun；未重建生产容器；未重启任何机器
-- 待用户放行后：合入 main → sync aliyun → 单次停机窗口全量部署（t35/t37/t39/t41/t45/t48/t49/t42 一并上线）
+- 待用户放行后：合入 main → sync aliyun → 单次停机窗口全量部署（t35/t37/t39/t41/t45/t48/t49/t42/t28-fix 一并上线）
