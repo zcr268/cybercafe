@@ -492,7 +492,7 @@ function usageBars(u) {
     ? `显存${(u.gpu_mem_used_mb/1024).toFixed(1)}/${Math.round(u.gpu_mem_total_mb/1024)}G` : "";
   return barHtml(`CPU ${u.cpu_pct ?? "-"}%`, u.cpu_pct)
        + barHtml(`内存 ${u.mem_used_gb ?? "-"}/${u.mem_total_gb ?? "-"}G ${u.mem_pct ?? "-"}%`, u.mem_pct)
-       + (u.gpu_util_pct != null ? barHtml(`GPU ${u.gpu_util_pct}% ${gpuMem}`, u.gpu_util_pct) : "");
+       + (u.gpu_util_pct != null ? barHtml(`GPU ${u.gpu_util_pct}% ${gpuMem}${u.gpu_src ? `·${u.gpu_src}` : ""}`, u.gpu_util_pct) : "");
 }
 // 部署节点 → 总进度权重（model_pull/engine_start/strata_setup 占 50~90；vllm/sglang 引擎步含权重下载）
 const STEP_W = { gpu_check: 5, docker: 10, mirrors: 15, gpu_toolkit: 25, pull_images: 40,

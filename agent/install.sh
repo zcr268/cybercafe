@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Version: 1.0.1
+# Version: 1.0.2
 # CyberCafe 安装脚本（由云管理端动态注入 __API_BASE__ / __DEVICE_KEY__ 后下发）
 # 用法:
 #   单机模式: curl -fsSL "<云管理地址>/install.sh?key=<设备KEY>" | bash
@@ -22,13 +22,37 @@ IMAGE_PREP=""
 IMAGE_ROOT=""
 
 # 硬件指纹（install.sh 与 provision.sh 各一份、必须逐字相同；t39 三级回退）：
-#   ① GPU UUID（nvidia-smi，多卡 UUID 排序 join）→ ② 物理网卡 MAC → ③ machine-id
+#   ① GPU UUID（/proc 优先 → nvidia-smi，多卡 UUID 排序 join）→ ② 物理网卡 MAC → ③ machine-id
 # 输出格式：`<fp> <source>`（caller 用 read HW_FP FP_SOURCE 解析；$( ) 子壳内改不了外部变量）
 FP_SOURCE="gpu"
 hw_fingerprint() {
-  local macs=() dev name mac joined id nvidia_bin out src fp
-  # ---- ① GPU UUID（nvidia-smi 探测：PATH → 常见绝对路径；输出空/失败一律降级，不得中断装机）----
+  local macs=() dev name mac joined id nvidia_bin out src fp uuid uuids=()
+  # ---- ① GPU UUID（/proc 优先 → nvidia-smi 兜底；仅接受 ^GPU-[0-9A-Fa-f-]+$，否则降级 MAC）----
+  # 【边界】「身份走 /proc、负载走 NVML」：/proc/driver/nvidia 只有身份字段
+  # （gpus/*/information 仅 Model/IRQ/GPU UUID/Video BIOS/Bus Location 等），无 memory/utilization——
+  # /proc 只用于取 UUID（t49 新增不依赖 nvidia-smi 的优先源），禁止把它当显存/利用率源。
+  # 无卡机 gpus/ 为空 → 自然落到 nvidia-smi/MAC。格式校验修 t40 缺陷#4：
+  # 'No devices were found' 等文本/小写 gpu- 前缀一律拒绝（fullmatch 语义）。
   src="gpu"
+  uuids=()
+  for inf in /proc/driver/nvidia/gpus/*/information; do
+    [ -f "$inf" ] || continue
+    while IFS= read -r uuid; do
+      [ -z "$uuid" ] && continue
+      if printf '%s\n' "$uuid" | grep -Eq '^GPU-[0-9A-Fa-f-]+$'; then uuids+=("$uuid"); fi
+    done < <(sed -n 's/^GPU UUID:[[:space:]]*//p' "$inf")
+  done
+  if [ "${#uuids[@]}" -gt 0 ]; then
+    joined="$(printf '%s\n' "${uuids[@]}" | sort | paste -sd'|' -)"
+    if command -v sha256sum >/dev/null 2>&1; then
+      fp="$(printf '%s' "$joined" | sha256sum | cut -c1-12)"
+    else
+      fp="$(printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12)"
+    fi
+    echo "$fp $src"
+    return 0
+  fi
+  # nvidia-smi 兜底（同 fullmatch 校验；输出空/异常/非 GPU- 一律不写入指纹）
   nvidia_bin=""
   if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia_bin="$(command -v nvidia-smi)"
@@ -37,21 +61,23 @@ hw_fingerprint() {
       if [ -x "$p" ]; then nvidia_bin="$p"; break; fi
     done
   fi
-  out=""
+  uuids=()
   if [ -n "$nvidia_bin" ]; then
     out="$($nvidia_bin --query-gpu=uuid --format=csv,noheader 2>/dev/null || true)"
+    while IFS= read -r uuid; do
+      [ -z "$uuid" ] && continue
+      if printf '%s\n' "$uuid" | grep -Eq '^GPU-[0-9A-Fa-f-]+$'; then uuids+=("$uuid"); fi
+    done <<< "$out"
   fi
-  if [ -n "$out" ]; then
-    joined="$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort | paste -sd'|' - || true)"
-    if [ -n "$joined" ]; then
-      if command -v sha256sum >/dev/null 2>&1; then
-        fp="$(printf '%s' "$joined" | sha256sum | cut -c1-12)"
-      else
-        fp="$(printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12)"
-      fi
-      echo "$fp $src"
-      return 0
+  if [ "${#uuids[@]}" -gt 0 ]; then
+    joined="$(printf '%s\n' "${uuids[@]}" | sort | paste -sd'|' -)"
+    if command -v sha256sum >/dev/null 2>&1; then
+      fp="$(printf '%s' "$joined" | sha256sum | cut -c1-12)"
+    else
+      fp="$(printf '%s' "$joined" | cksum | awk '{print $1}' | cut -c1-12)"
     fi
+    echo "$fp $src"
+    return 0
   fi
   # ---- ② 物理网卡 MAC（排除列表/全零 MAC 同 t33；排序后 sha256 前 12 位）----
   src="mac"

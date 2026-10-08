@@ -11,13 +11,14 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
 POLL_MIN, POLL_MAX = 3, 300     # poll_after 钳制范围
 RAW_UA = "cybercafe-agent/%s" % VERSION
 
+import ctypes
 import hashlib
 import json
 import os
@@ -228,24 +229,137 @@ def _cpu_short_sample():
         return round(100.0 * (1 - di / dt), 1)
     return None
 
+# ---------------- GPU 多源采集（t49） ----------------
+# 负载（显存/利用率）二源降级：NVML 直连主源 → nvidia-smi 兜底 → 都失败 gpu_src=none 不写字段。
+# 【边界①·防回退】「身份走 /proc、负载走 NVML」：/proc/driver/nvidia 只有身份字段
+# （gpus/*/information 仅 Model/IRQ/GPU UUID/Video BIOS/Bus Type/DMA Size/DMA Mask/Bus Location/
+# Device Minor/GPU Excluded），无 memory/utilization；/sys/class/drm 的 mem_info_vram_used/
+# gpu_busy_percent 属 AMD amdgpu 接口、N 卡不存在。禁止把 /proc 当显存/利用率兜底源
+# （会得到永远为空的假兜底，掩盖真实失败）。
+
+_nvml_state = {"lib": None, "handle": None, "err": None}
+
+class _NvmlMemoryV2(ctypes.Structure):
+    # 【边界②·防回退】必须同时用对符号名（nvmlDeviceGetMemoryInfo_v2）与结构体版本
+    # （version=0x02000028）。禁止用 v1 符号 nvmlDeviceGetMemoryInfo / v1 三字段结构体：
+    # 真机实测 v1 符号读出的 used=298MiB 是虚高脏数据（真实 1MiB，reserved 被计入）；
+    # 用 v1 结构体调 _v2 符号会得 rc=13 FUNCTION_NOT_FOUND（驱动校验 version 后干净拒绝，
+    # 错配是干净可判定而非静默脏数据）。若 _v2 不可用，视为 NVML 整体不可用 →
+    # 显存/利用率整体落 nvidia-smi 兜底，宁缺毋滥。
+    _fields_ = [
+        ("version", ctypes.c_uint32),   # 必须 = NVML_MEM_V2_VERSION
+        ("total", ctypes.c_uint64),
+        ("reserved", ctypes.c_uint64),
+        ("free", ctypes.c_uint64),
+        ("used", ctypes.c_uint64),
+    ]
+
+NVML_MEM_V2_VERSION = 0x02000028
+
+class _NvmlUtilization(ctypes.Structure):
+    _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
+
+def _nvml_load():
+    """NVML 初始化（懒加载缓存）；失败按 nvmlReturn_t/异常分类记录 err，供降级路径区分。
+    错误码语义：12=LIBRARY_NOT_FOUND / 9=DRIVER_NOT_LOADED（初始化失败）；6=NOT_FOUND（无设备）。"""
+    if _nvml_state["lib"] is not None or _nvml_state["err"]:
+        return _nvml_state["lib"] is not None
+    try:
+        lib = ctypes.CDLL("libnvidia-ml.so.1")
+    except OSError:
+        _nvml_state["err"] = "lib_missing"        # 库缺失 → 整体降级 nvidia-smi
+        return False
+    _nvml_state["lib"] = lib
+    try:
+        fn = lib.nvmlInit_v2
+        fn.restype = ctypes.c_int
+        if fn() != 0:
+            raise RuntimeError("nvmlInit_v2 rc!=0")
+    except (AttributeError, RuntimeError):
+        _nvml_state["err"] = "init_failed"         # 初始化失败（含 12/9 语义） → 整体降级
+        return False
+    try:
+        fnh = lib.nvmlDeviceGetHandleByIndex_v2
+        fnh.restype = ctypes.c_int
+        fnh.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)]
+        h = ctypes.c_void_p()
+        if fnh(0, ctypes.byref(h)) != 0:
+            raise RuntimeError("getHandle rc!=0")
+    except (AttributeError, RuntimeError):
+        _nvml_state["err"] = "no_device"           # 无设备/驱动未加载（6/9 语义） → 整体降级
+        return False
+    _nvml_state["handle"] = h.value
+    return True
+
+def _nvml_read_once():
+    """NVML 读一次 (util, used_MiB, total_MiB) 或 None（任一 rc≠0/异常 → None →
+    该样本无效，整体落 nvidia-smi 兜底）。"""
+    if not _nvml_load():
+        return None
+    lib, h = _nvml_state["lib"], _nvml_state["handle"]
+    try:
+        fu = lib.nvmlDeviceGetUtilizationRates
+        fu.restype = ctypes.c_int
+        fu.argtypes = [ctypes.c_void_p, ctypes.POINTER(_NvmlUtilization)]
+        util = _NvmlUtilization()
+        if fu(h, ctypes.byref(util)) != 0:
+            return None
+        fm = lib.nvmlDeviceGetMemoryInfo_v2
+        fm.restype = ctypes.c_int
+        fm.argtypes = [ctypes.c_void_p, ctypes.POINTER(_NvmlMemoryV2)]
+        mem = _NvmlMemoryV2()
+        mem.version = NVML_MEM_V2_VERSION
+        if fm(h, ctypes.byref(mem)) != 0:
+            return None
+        return (util.gpu, mem.used // (1024 * 1024), mem.total // (1024 * 1024))
+    except Exception:
+        return None
+
+def _smi_read_once():
+    """nvidia-smi 兜底读一次 (util, used_MiB, total_MiB) 或 None；
+    直接取 nvidia-smi 自身 rc（避免 shell 管道污染 $?），输出不可解析 → None。"""
+    rc, out = run("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total "
+                  "--format=csv,noheader,nounits 2>/dev/null", timeout=15)
+    if rc != 0:
+        return None
+    for line in out.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            gu, mu, mtot = [int(x.strip()) for x in line.split(",")[:3]]
+            return (gu, mu, mtot)
+        except (ValueError, IndexError):
+            return None
+    return None
+
 def _gpu_samples():
-    """GPU 利用率 1s 窗口内采样 3 次取最大（避开瞬时 0 快照）；
-    显存取最大利用率那次采样的真实值。无 GPU 时返回 None。"""
+    """GPU 利用率/显存多源采样：1s 窗口内采样 3 次取最大（避开瞬时 0）；
+    主源 NVML（nvml）→ nvidia-smi 兜底；返回 (util, used_MiB, total_MiB, src) 或 None。
+    gpu_src 三值：nvml / nvidia-smi / none（none 在 collect_usage 中 fallback 处理）。"""
+    src = "nvml" if _nvml_load() else "nvidia-smi"
+    read = _nvml_read_once if src == "nvml" else _smi_read_once
     best = None
     for i in range(3):
-        rc, out = run("nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total "
-                      "--format=csv,noheader,nounits 2>/dev/null | head -1", timeout=15)
-        if rc == 0 and out.strip():
-            try:
-                gu, mu, mtot = [int(x.strip()) for x in out.strip().split(",")[:3]]
-            except ValueError:
-                pass
-            else:
-                if best is None or gu > best[0]:
-                    best = (gu, mu, mtot)
+        r = read()
+        if r and (best is None or r[0] > best[0]):
+            best = r
         if i < 2:
             time.sleep(0.4)
-    return best
+    if best:
+        return (best[0], best[1], best[2], src)
+    # 主源失败 → 另一源整体兜底（NVML 不可用/单指标失败；禁用 v1，宁缺毋滥）
+    if src == "nvml":
+        best = None
+        for i in range(3):
+            r = _smi_read_once()
+            if r and (best is None or r[0] > best[0]):
+                best = r
+            if i < 2:
+                time.sleep(0.4)
+        if best:
+            return (best[0], best[1], best[2], "nvidia-smi")
+    return None
 
 def collect_usage():
     """采集 CPU/内存/GPU 用量。
@@ -288,12 +402,16 @@ def collect_usage():
         pass
     gpu = _gpu_samples()
     if gpu:
-        gu, mu, mtot = gpu
+        gu, mu, mtot, gpu_src = gpu
+        u["gpu_src"] = gpu_src
         u["gpu_util_pct"] = gu
         u["gpu_mem_used_mb"] = mu
         u["gpu_mem_total_mb"] = mtot
         u["gpu_mem_pct"] = round(100.0 * mu / mtot, 1) if mtot else 0
         u["gpu_note"] = "模型已加载" if mu >= 256 else "模型未加载（空闲自动卸载，属正常）"
+    else:
+        # 双源皆败：如实标记来源，不写 gpu_util_pct/gpu_mem_used_mb（缺失语义，UI 不显示为 0）
+        u["gpu_src"] = "none"
     return u
 
 # ---------------------------------------------------------------- 云端交互
