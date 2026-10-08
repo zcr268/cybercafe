@@ -146,6 +146,15 @@ function adminOk(request, env) {
   return { ok: true };
 }
 
+// 请求来源外网 IP：生产走 cloudflared → workerd，CF-Connecting-IP 由 Cloudflare 注入；
+// X-Forwarded-For 作兜底（取最左的真实来源，右段为代理链）。
+function requestSrcIp(request) {
+  const cf = request.headers.get("CF-Connecting-IP");
+  if (cf && cf.trim()) return cf.trim();
+  const xff = (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim();
+  return xff || "";
+}
+
 // ---------- 设备侧 API ----------
 
 async function handleRegister(request, env, dev) {
@@ -163,6 +172,12 @@ async function handleRegister(request, env, dev) {
     last_seen: now,
     deploy: old.deploy || { state: "idle" },
   };
+  // 请求来源外网 IP（云侧视角）；为空时不覆盖已有值（避免本地/异常请求抹掉真实外网 IP）
+  const srcIp = requestSrcIp(request);
+  if (srcIp) {
+    rec.remote_ip = srcIp;
+    rec.remote_ip_ts = now;
+  }
   await env.CYBERCAFE_KV.put(key, JSON.stringify(rec));
   return json({ ok: true, device_id: dev.id });
 }
@@ -174,6 +189,12 @@ async function handleHeartbeat(request, env, dev) {
   const key = `device:${dev.id}`;
   const old = (await env.CYBERCAFE_KV.get(key, "json")) || {};
   const rec = { ...old, ...upd, device_id: dev.id, last_seen: now };
+  // 请求来源外网 IP（云侧视角）；为空时不覆盖已有值
+  const srcIp = requestSrcIp(request);
+  if (srcIp) {
+    rec.remote_ip = srcIp;
+    rec.remote_ip_ts = now;
+  }
   delete rec.command;
   // deploy 深度合并：agent 部分上报（如 restart_tunnel 仅带 state/tunnel_url）时保留已有
   // engine/model/model_api_key，避免重建隧道后聊天失去鉴权 Key；

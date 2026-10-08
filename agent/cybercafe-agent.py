@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.3.8"
+VERSION = "0.3.9"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -95,6 +95,7 @@ def collect_device_info():
         "gpu_mem_mb": 0,
         "disk_root": "",
         "ips": [],
+        "net": [],
         "agent_version": VERSION,
     }
     # machine_id：与基础镜像 provision（provision.sh 采集 /etc/machine-id）一致，
@@ -139,7 +140,70 @@ def collect_device_info():
     rc, out = run("ip -o -4 addr show scope global | awk '{print $2\": \"$4}'")
     if rc == 0:
         info["ips"] = [l.strip() for l in out.strip().splitlines() if l.strip()]
+    info["net"] = collect_net()
     return info
+
+# 虚拟网口前缀（排除：lo / docker* / veth* / br-* / virbr* / tun* / tap* /
+# tailscale* / zt* / wg* / gre* / sit* / erspan* / ip6* / vti* 等隧道与虚拟口）；仅收物理网卡
+NET_VIRT_PREFIXES = ("lo", "docker", "veth", "br-", "virbr", "tun", "tap",
+                     "tailscale", "zt", "wg", "gre", "gretap", "erspan", "sit",
+                     "ipip", "ip6", "ip_vti", "vti", "tunl", "vlan", "bond",
+                     "dummy", "ifb", "macvtap", "macvlan")
+
+def _is_virtual_iface(name):
+    n = (name or "").lower()
+    return any(n.startswith(p) for p in NET_VIRT_PREFIXES)
+
+def _is_zero_mac(m):
+    """全 0 的 MAC（00:00:00:00:00:00 或 ipv6 长度全零）视为无真实硬件地址"""
+    return sum(1 for c in (m or "").lower() if c not in "0:") == 0
+
+def collect_net():
+    """物理网卡 MAC/IP 列表：[{"iface":.., "mac":.., "ip":..}]
+
+    - MAC 主来源 /sys/class/net/<iface>/address，兜底 `ip -o link show`（link/ether）；
+    - IPv4 沿用 `ip -o -4 addr ... scope global` 输出按网卡名配对；
+    - 无 IPv4 的物理口保留 mac、ip 留空；虚拟口（lo/docker*/veth*/br-* 等）排除。
+    """
+    # 物理口清单（/sys/class/net 全量过滤虚拟前缀）
+    ifaces = []
+    try:
+        ifaces = sorted(d for d in os.listdir("/sys/class/net") if not _is_virtual_iface(d))
+    except Exception:
+        pass
+    # MAC：主来源 /sys/class/net/<iface>/address
+    macs = {}
+    for i in ifaces:
+        try:
+            with open("/sys/class/net/%s/address" % i) as f:
+                m = f.read().strip()
+                if m and not _is_zero_mac(m):
+                    macs[i] = m.lower()
+        except Exception:
+            pass
+    # 兜底：ip -o link show（/sys 不可用时取 link/ether）
+    if len(macs) < len(ifaces):
+        rc, out = run("ip -o link show 2>/dev/null")
+        if rc == 0:
+            for line in out.splitlines():
+                # 形如: 2: eth0: <BROADCAST,...> mtu 1500 ... \  link/ether aa:bb:cc:dd:ee:ff brd ...
+                m = re.match(r"^\d+:\s+([^@:\s]+)\s.*?link/ether\s+([0-9a-fA-F:]{17})", line)
+                if m and not _is_virtual_iface(m.group(1)):
+                    mac = m.group(2).lower()
+                    if not _is_zero_mac(mac):
+                        macs.setdefault(m.group(1), mac)
+    # IPv4 按网卡名配对（与 ips 同来源：scope global）
+    ipmap = {}
+    rc, out = run("ip -o -4 addr show scope global 2>/dev/null | awk '{print $2\": \"$4}'")
+    if rc == 0:
+        for l in out.strip().splitlines():
+            if ":" in l:
+                iface, ip = l.split(":", 1)
+                ipmap[iface.strip()] = ip.strip().split("/")[0]
+    net = []
+    for i in ifaces:
+        net.append({"iface": i, "mac": macs.get(i, ""), "ip": ipmap.get(i, "")})
+    return net
 
 # ---------------------------------------------------------------- 资源用量采集
 

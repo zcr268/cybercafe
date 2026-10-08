@@ -272,8 +272,15 @@ function renderDevices() {
   $("devRows").innerHTML = devices.map(d => {
     const dep = d.deploy || {};
     const isOn = d.online === true;   // 心跳语义：状态列主状态 = 在线/离线（非部署状态）
-    const hw = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
+    const hwBase = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
       .filter(Boolean).join("<br>");
+    // 物理网卡行（多网卡多行；缺失字段跳过该段）+ 云侧来源外网 IP 行
+    const netRows = (d.net || []).map(n => {
+      const seg = [n.iface, n.ip, n.mac].filter(Boolean).join(" · ");
+      return seg ? esc(seg) : "";
+    }).filter(Boolean).join("<br>");
+    const extIp = d.remote_ip ? `外网 ${esc(d.remote_ip)}` : "";
+    const hw = [hwBase, netRows, extIp].filter(Boolean).join("<br>");
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
     const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))

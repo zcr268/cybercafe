@@ -113,6 +113,7 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 - `install.sh`：安装 python3/curl 依赖 → 从云管理端实时拉取最新控制脚本（含设备Key注入）→ 写入 systemd 服务（开机自启、崩溃重启）
 - `cybercafe-agent.py`：启动采集设备信息注册；每 10s 心跳上报状态并拉取指令；部署流水线逐节点上报进度；云端脚本版本变化时自动下载替换并重启（自更新）
 - 支持的指令：`deploy`（部署模型）、`stop`（停止容器）、`restart_tunnel`（重建隧道并上报新域名）
+- 设备信息字段（v0.3.9 起）：`ips`（IPv4 列表，沿用）+ `net`（物理网卡数组 `[{"iface","mac","ip"}]`，排除 lo/docker*/veth*/br-* 等虚拟口，无 IPv4 的物理口保留 mac）；云端按心跳请求来源记录 `remote_ip`（云侧外网 IP，`CF-Connecting-IP` 优先、`X-Forwarded-For` 兜底，为空不覆盖旧值），UI 设备表展示网卡 · IP · MAC 与外网 IP。
 
 ## 统一一键卸载（uninstall-all.sh，v0.3.7+）
 
