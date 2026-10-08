@@ -603,12 +603,23 @@ def step_gateway(api_key):
     else:
         run("docker restart chatgw", timeout=60)
     time.sleep(2)
-    rc, out = run('curl -s -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" http://127.0.0.1:8000/v1/models' % api_key)
-    if out.strip() != "200":
-        raise DeployError("网关鉴权自检失败: http " + out.strip())
-    rc, out = run('curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/v1/models')
-    if out.strip() != "401":
-        raise DeployError("网关未鉴权暴露! http " + out.strip())
+    # R3：网关自检与 nginx 启动存在时序竞争——网关刚起来时自检瞬时 000 被误判失败（重发即过）。
+    # 改为有界退避重试：总时长上限 90s（wall-clock 硬上限，每次 curl 带 -m 5 与 run 超时）；
+    # 到上限仍不就绪 → 如实报 fail（宁如实失败，不虚假成功——与 R2 同源红线）。
+    total_cap = 90.0
+    t0 = time.time()
+    ok = False
+    last = ("", "")
+    while time.time() - t0 < total_cap:
+        rc1, out1 = run('curl -s -m 5 -o /dev/null -w "%%{http_code}" -H "Authorization: Bearer %s" http://127.0.0.1:8000/v1/models' % api_key, timeout=15)
+        rc2, out2 = run('curl -s -m 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/v1/models', timeout=15)
+        last = (out1.strip(), out2.strip())
+        if last == ("200", "401"):
+            ok = True
+            break
+        time.sleep(2)
+    if not ok:
+        raise DeployError("网关鉴权自检失败: %ds 上限内未就绪（key=%s 无key=%s）——nginx/网关启动超时，如实上报" % (int(total_cap), last[0], last[1]))
     return "网关就绪（带Key鉴权+CORS）"
 
 def step_tunnel():
