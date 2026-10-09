@@ -16,7 +16,10 @@ for arg in "$@"; do
   esac
 done
 
-echo "[cybercafe-ocr] docker 卸载：rm -f 容器 + rmi 镜像 + 清目录（零残留）"
+echo "[cybercafe-ocr] docker 卸载：rm -f 容器 + rmi 镜像 + 清目录（零残留；含 legacy systemd/进程清理）"
+systemctl stop cybercafe-ocr.service 2>/dev/null || true
+systemctl disable cybercafe-ocr.service 2>/dev/null || true
+pkill -9 -f 'ocr.py --serve' 2>/dev/null || true
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 docker rmi -f "$IMAGE" >/dev/null 2>&1 || true
 rm -rf "$OCR_DIR"

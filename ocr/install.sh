@@ -46,6 +46,10 @@ EXPOSE $PORT
 CMD ["python", "/app/ocr.py", "--serve", "--host", "0.0.0.0", "--port", "$PORT"]
 EOF
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    # t98+migration：清 legacy 形态残留（旧 systemd 单元/旧 venv 进程仍占 8820 会致 docker -p 冲突）
+    systemctl stop cybercafe-ocr.service 2>/dev/null || true
+    systemctl disable cybercafe-ocr.service 2>/dev/null || true
+    pkill -9 -f 'ocr.py --serve' 2>/dev/null || true
     echo "[cybercafe-ocr] 构建镜像 ${IMAGE}:${TAG} （首次较久，国内源）..."
     if ! docker build -t "$IMAGE:$TAG" "$OCR_DIR/src" >/dev/null 2>&1; then
         echo "[cybercafe-ocr] ERROR: 镜像构建失败（检查网络/磁盘）" >&2
