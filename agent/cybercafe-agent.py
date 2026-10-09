@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.10"
+VERSION = "0.7.0"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -1067,7 +1067,8 @@ def _stop_ocr_server():
         "pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
 
 def _stop_h3_process():
-    """互斥：停 H3 进程——真机 systemd 单元优先（t92），install.sh stop 子命令兜底"""
+    """互斥：停 H3——t99 容器形态 docker rm -f 优先（替代 systemctl/pkill），install.sh stop 兜底"""
+    run("docker rm -f cybercafe-h3 2>/dev/null || true", timeout=60)
     run("systemctl stop minimax-h3.service 2>/dev/null || true; "
         "systemctl stop cybercafe-h3.service 2>/dev/null || true", timeout=30)
     if os.path.exists(_H3_SRC_DIR + "/install.sh"):
@@ -1190,7 +1191,8 @@ def _lru_recycle(target_gb):
                 continue
             img = parts[2].strip()
             if not img or img in keep_img or not any(k in img for k in
-                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
+                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw",
+                     "cybercafe-ocr", "cybercafe-h3", "ghcr", "mirror")):
                 continue
             rows.append((parts[1].strip(), img))   # (CreatedAt, image)
         rows.sort(key=lambda r: r[0])              # 升序 → 最近最少使用（最旧）优先

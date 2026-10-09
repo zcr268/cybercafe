@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CyberCafe MiniMax-H3 本地部署脚本（install.sh）
+# CyberCafe MiniMax-H3 本地部署脚本（install.sh）—— docker 容器形态（t99）
 # -----------------------------------------------------------------------------
-# 规格核实结论（2026-10-08）：
+# 规格核实结论（2026-10-08，t25）：
 #   MiniMax H3 = omni-modal 视频+音频生成系统（注意：非聊天 LLM，无 chat 端点）
 #   - 架构：H3-Omni-Transformer 33B dense（~13B 为 AdaLN 分支，推理可省）+
 #           H3-Encoder = Qwen3-VL-32B（取第 50 层 hidden）+ VisualVAE(f16t4d24) +
@@ -16,10 +16,15 @@
 #       ⚠️ Abiray/MiniMax-H3-Pruned-GGUF 为 ComfyUI-GGUF 布局，sd.cpp 加载报
 #          model metadata validation failed（t48 真机实测），本脚本不使用
 #   - 运行时：stable-diffusion.cpp（leejet，Day-1 支持 MiniMax-H3，GGUF 原生）
-#   - 端口：sd-server 独立端口 11435（避开 ollama/vllm/sglang/strata 共用的 11434），
+#   - docker 形态（t99）：CUDA 编译进 Dockerfile（nvidia/cuda:12.1.0-devel ←
+#       与真机 12.2 toolchain 同代、sm_89 编译、驱动 535 兼容，vLLM/SGLang 同基底先例），
+#       权重命名卷 h3-weights 持久化（重装不重下载 ~27GB），docker run --gpus all（CDI
+#       已验证 535 可用）暴露 11435；镜像与旧 build 纳入磁盘 LRU 回收（权重卷属当前
+#       部署保护，非当前才可回收——回收由 agent 侧统一管理）。
+#   - 端口：sd-server 容器内 11435 映射宿主 127.0.0.1:11435（避开 11434），
 #           nginx 网关不变；兼容 /v1/models 与 OpenAI API 形态，外部可再套 Key 网关。
-#   - GPU 放置语义（重要，勿误读日志）：
-#       本脚本固定使用 --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu。
+#   - GPU 放置语义（重要，勿误读日志，t55 澄清）：
+#       容器启动参数固定 --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu。
 #       在该配置下，sd.cpp 日志 "total params memory size = ... (VRAM 0.00MB, RAM ...)" 中
 #       text_encoders ...(RAM) 表示【文本编码器参数常驻系统 RAM】（te=cpu 的预期行为），
 #       VRAM 0.00MB 只统计"参数驻留显存"，不代表 GPU 未参与计算；
@@ -31,304 +36,245 @@
 #       —— 组件标签按 params_backend 是否 CPU 后端返回 "RAM"/"VRAM"，
 #          te=cpu → "RAM"（参数在 RAM），diffusion/vae=cuda0 运行时流式上卡。
 # -----------------------------------------------------------------------------
-# 用法:  bash install.sh            # 默认档（UD-Q2_K_XL，sd.cpp 兼容最小档）
+# 用法:  bash install.sh            # 默认档（UD-Q2_K_XL，docker build+run）
 #        H3_QUANT=Q4_K_M bash install.sh   # 16GB 卡推荐平衡档（11.4GB denoiser）
 #        H3_QUANT=Q5_0 bash install.sh     # 可选更高档（13.0GB denoiser）
 #        H3_QUANT=UD-Q3_K_XL bash install.sh # 可选（8.9GB，质量/速度均衡）
-#        H3_SERVER=0 bash install.sh # 只装模型+CLI 验证，不常驻 HTTP 服务
 #        bash install.sh status     # 状态（读 .version；未安装→uninstalled）
-#        bash install.sh start      # 启动 sd-server（需已安装；写 .version state=running）
-#        bash install.sh stop       # 停止 sd-server（写 .version state=installed）
-# 卸载:  bash uninstall.sh
+#        bash install.sh start      # 启动容器（需已安装；写 .version state=running）
+#        bash install.sh stop       # 停止容器（docker rm -f；写 .version state=installed）
+#        bash install.sh uninstall  # 卸载（docker rm -f + rmi + 清目录；权重卷保留待回收）
 # =============================================================================
 set -euo pipefail
 
 # ------------------------- 配置 -------------------------
-H3_ROOT="${H3_ROOT:-/opt/minimax-h3}"          # 全部内容收敛此目录（卸载=删此目录）
+H3_ROOT="${H3_ROOT:-/opt/minimax-h3}"          # 状态/脚本目录（权重在命名卷内）
 H3_QUANT="${H3_QUANT:-UD-Q2_K_XL}"             # 默认档：unsloth UD-Q2_K_XL（sd.cpp 兼容，t48 实测 Abiray Q3_K_M 为 ComfyUI 布局不兼容）
-H3_SERVER="${H3_SERVER:-1}"                    # 1=常驻 sd-server(11435)，0=CLI 验证
-H3_PORT="${H3_PORT:-11435}"                    # 独立端口，避开 11434
-H3_AUX_REPO="unsloth/MiniMax-H3-GGUF"          # 文本编码器仓库（denoiser 档位各自内置 repo，见 case）
-H3_VAE_REPO="Comfy-Org/MiniMax-H3"             # VAE（safetensors，官方 diffusers 仓库）
+H3_PORT="${H3_PORT:-11435}"                    # 宿主暴露端口（容器内 11435）
 H3_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"   # 国内镜像优先
-SDCPP_DIR="$H3_ROOT/sd.cpp"
-MODELS_DIR="$H3_ROOT/models"
-LOG="$H3_ROOT/install.log"
-GCC_ISO="/root/.cybercafe-gcc12"               # 与 strata 相同的 gcc-12 隔离目录（避免污染系统 gcc）
+H3_IMAGE="cybercafe-h3"                        # 镜像名（磁盘 LRU 回收对象）
+H3_TAG="0.1.0"                                 # 镜像 tag
+H3_CONTAINER="cybercafe-h3"                    # 容器名（互斥/回收按此）
+H3_VOLUME="h3-weights"                         # 权重命名卷（重装不重下载）
 H3_VERSION_FILE="$H3_ROOT/.version"            # 组件状态标记（t74：agent 心跳 components.h3 读它）
-# CUDA toolkit 探测前置（子命令 start 与主流程共用；nvcc 不在 PATH 时注入）
-CUDA_ENV=""
-if [ -x /usr/local/cuda/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}";
-elif [ -x /usr/local/cuda-12.2/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda-12.2/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:${LD_LIBRARY_PATH:-}";
-fi
 
 say()  { printf '\033[1;34m[h3]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[h3 ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# ------------------------- 子命令（t74：页面安装/卸载后的启停与状态查询） -------------------------
-# 状态四态由 agent 读 .version 动态计算；这里提供 status/start/stop 三个子命令供页面操作。
-H3_CMD="${1:-}"
-H3_VERSION="0.1.0"    # 组件版本（t74：写 .version 上报页面）
-
-h3_write_version() {  # h3_write_version <state>
-  printf '{"state":"%s","version":"%s","quant":"%s","ts":%s}\n' \
-         "$1" "$H3_VERSION" "${H3_QUANT}" "$(date +%s)" > "$H3_VERSION_FILE"
+# ------------------------- 常用函数 -------------------------
+h3_write_version() {  # h3_write_version <state> [version]
+  local st="$1"
+  local ver="${2:-$H3_TAG}"
+  printf '{"state":"%s","version":"%s","quant":"%s","mode":"docker","ts":%s}\n' \
+         "$st" "$ver" "${H3_QUANT}" "$(date +%s)" > "$H3_VERSION_FILE"
 }
+
+h3_diff_name() {  # h3_diff_name <quant> -> stdout 权重文件名
+  case "$1" in
+    UD-Q2_K_XL) echo "minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf" ;;
+    UD-Q3_K_XL) echo "minimax_h3_fl2va_pruned-UD-Q3_K_XL.gguf" ;;
+    Q4_K_M)     echo "minimax_h3_fl2va_pruned-Q4_K.gguf" ;;
+    Q5_0)       echo "minimax_h3_fl2va_pruned-Q5_0.gguf" ;;
+    *) die "未知 H3_QUANT=$1" ;;
+  esac
+}
+
+h3_run_server() {  # h3_run_server <diff_name>：docker run --gpus all（te=cpu / denoiser+VAE cuda0）
+  docker run -d --name "$H3_CONTAINER" --gpus all --restart unless-stopped \
+    -p "127.0.0.1:$H3_PORT:11435" \
+    -v "$H3_VOLUME:/models" \
+    -e H3_QUANT="$H3_QUANT" \
+    "$H3_IMAGE:$H3_TAG" \
+    sd-server \
+      --diffusion-model "/models/$1" \
+      --vae "/models/minimax_h3_video_vae_fp16.safetensors" \
+      --audio-vae "/models/minimax_h3_audio_vae_fp32.safetensors" \
+      --llm "/models/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" \
+      --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu \
+      --diffusion-fa --cfg-scale 1.0 \
+      --listen-ip 0.0.0.0 --listen-port 11435
+}
+
+h3_wait_ready() {  # 轮询 /v1/models 200（容器冷启动含权重加载，最长 4 分钟）
+  local code=""
+  for _ in $(seq 1 120); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:$H3_PORT/v1/models" || true)
+    [ "$code" = 200 ] && break
+    sleep 2
+  done
+  [ "$code" = 200 ]
+}
+
+# ------------------------- 子命令（t74：页面安装/卸载后的启停与状态查询；t99 容器化） -------------------------
+H3_CMD="${1:-}"
 
 if [ "$H3_CMD" = "status" ]; then
   if [ -f "$H3_VERSION_FILE" ]; then cat "$H3_VERSION_FILE"; else echo '{"state":"uninstalled"}'; fi
   exit 0
 fi
 if [ "$H3_CMD" = "start" ]; then
-  [ -x "$SDCPP_DIR/build/bin/sd-server" ] || die "sd-server 不存在（先安装）"
-  pkill -f "sd-server.*$H3_PORT" 2>/dev/null || true
-  # 与安装主流程第 5 步一致的启动参数（te=cpu / denoiser+VAE cuda0 / offload 流式）
-  # 权重文件名 = dl() 的档位编码名（见下载 case）
-  case "$H3_QUANT" in
-    UD-Q2_K_XL) DIFF_NAME="minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf" ;;
-    UD-Q3_K_XL) DIFF_NAME="minimax_h3_fl2va_pruned-UD-Q3_K_XL.gguf" ;;
-    Q4_K_M)     DIFF_NAME="minimax_h3_fl2va_pruned-Q4_K.gguf" ;;
-    Q5_0)       DIFF_NAME="minimax_h3_fl2va_pruned-Q5_0.gguf" ;;
-    *) die "未知 H3_QUANT=$H3_QUANT" ;;
-  esac
-  env $CUDA_ENV nohup "$SDCPP_DIR/build/bin/sd-server" \
-    --diffusion-model "$MODELS_DIR/$DIFF_NAME" \
-    --vae "$MODELS_DIR/minimax_h3_video_vae_fp16.safetensors" \
-    --audio-vae "$MODELS_DIR/minimax_h3_audio_vae_fp32.safetensors" \
-    --llm "$MODELS_DIR/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" \
-    --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu \
-    --diffusion-fa --cfg-scale 1.0 \
-    --listen-ip 127.0.0.1 --listen-port "$H3_PORT" \
-    > "$H3_ROOT/sd-server.log" 2>&1 &
-  for _ in $(seq 1 30); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:$H3_PORT/v1/models" || true)
-    [ "$code" = 200 ] && break
-    sleep 2
-  done
-  [ "$code" = 200 ] || die "sd-server 启动未就绪（HTTP ${code:-000}），见 $H3_ROOT/sd-server.log"
-  h3_write_version "running"
-  echo "{\"state\":\"running\",\"version\":\"$H3_VERSION\"}"
-  exit 0
+  [ -f "$H3_VERSION_FILE" ] || { echo '{"state":"uninstalled"}' >&2; exit 1; }
+  if [ "$(docker inspect -f '{{.State.Running}}' "$H3_CONTAINER" 2>/dev/null || echo false)" != "true" ]; then
+    h3_run_server "$(h3_diff_name "$H3_QUANT")" > /dev/null 2>&1 || true   # 失败继续（走下方就绪检查→failed 标记）
+  fi
+  # 容器未起来（docker run 失败/镜像缺失）→ 快速失败标记，不空转 4 分钟
+  if [ "$(docker inspect -f '{{.State.Running}}' "$H3_CONTAINER" 2>/dev/null || echo false)" != "true" ]; then
+    h3_write_version "failed"
+    echo '{"state":"failed","error":"sd-server 容器未运行（docker run 失败/镜像缺失，docker logs cybercafe-h3）"}' >&2
+    exit 1
+  fi
+  if h3_wait_ready; then
+    h3_write_version "running"
+    echo "{\"state\":\"running\",\"version\":\"$H3_TAG\",\"mode\":\"docker\"}"
+    exit 0
+  fi
+  # t85 F2 语义：启动失败如实标记失败态（页面不残留 running/installed 假象）
+  h3_write_version "failed"
+  echo '{"state":"failed","error":"sd-server 容器启动未就绪（docker logs cybercafe-h3）"}' >&2
+  exit 1
 fi
 if [ "$H3_CMD" = "stop" ]; then
   [ -f "$H3_VERSION_FILE" ] || { echo '{"state":"uninstalled"}' >&2; exit 1; }
-  pkill -f "sd-server.*$H3_PORT" 2>/dev/null || true
+  docker rm -f "$H3_CONTAINER" >/dev/null 2>&1 || true
   sleep 1
   h3_write_version "installed"
-  echo "{\"state\":\"installed\",\"version\":\"$H3_VERSION\"}"
+  echo "{\"state\":\"installed\",\"version\":\"$H3_TAG\",\"mode\":\"docker\"}"
+  exit 0
+fi
+if [ "$H3_CMD" = "uninstall" ]; then
+  docker rm -f "$H3_CONTAINER" >/dev/null 2>&1 || true
+  docker rmi -f "$H3_IMAGE:$H3_TAG" >/dev/null 2>&1 || true
+  # 权重卷保留（磁盘 LRU 回收管理，t97 语义：当前部署保护、非当前可回收）
+  rm -rf "$H3_ROOT"
+  echo '{"state":"uninstalled"}'
   exit 0
 fi
 
-mkdir -p "$H3_ROOT" "$MODELS_DIR"
-exec > >(tee -a "$LOG") 2>&1
-
 # ------------------------- 0. 环境预检 -------------------------
-say "=== MiniMax-H3 部署（v0.1，档位 ${H3_QUANT}，root=${H3_ROOT}）==="
+say "=== MiniMax-H3 docker 部署（v$H3_TAG，档位 ${H3_QUANT}，root=${H3_ROOT}）==="
 [ "$(id -u)" = 0 ] || die "请以 root 运行（sudo bash install.sh）"
+have docker || die "缺少 docker（先装 docker）"
+docker info >/dev/null 2>&1 || die "docker daemon 不可用"
 
-# 磁盘（~29GB 权重 + 编译产物，要求 >=40GB 可用）
+# 磁盘（~29GB 权重 + 镜像 + 编译缓存，要求 >=50GB 可用）
 avail_kb=$(df -B1 --output=avail / | tail -1 | tr -d ' ')
 avail_gb=$((avail_kb / 1024 / 1024 / 1024))
-[ "$avail_gb" -ge 40 ] || die "磁盘可用不足（$avail_gb GB < 40GB），无法容纳 ~29GB 权重"
+[ "$avail_gb" -ge 50 ] || die "磁盘可用不足（$avail_gb GB < 50GB），无法容纳 ~29GB 权重 + 镜像"
 
-# 内存（Q4 文本编码器 14.6GB + 扩散 8.9GB offload + VAE，要求 >=24GB）
-mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)
-mem_gb=$((mem_kb / 1024 / 1024))
-[ "$mem_gb" -ge 24 ] || die "内存不足（${mem_gb}GB < 24GB），31GB 目标机可过"
+mkdir -p "$H3_ROOT"
 
-# ------------------------- 1. 依赖与编译工具链 -------------------------
-say "=== 依赖: git/cmake/build-essential/pkg-config ==="
-DEPS="git cmake build-essential pkg-config"
-for d in git cmake g++ pkg-config; do have "$d" || { need_apt=1; break; }; done
-if [ "${need_apt:-}" = 1 ]; then
-  apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $DEPS
-fi
-
-# CUDA toolkit 预检 + nvcc/gcc 兼容（t23 教训：CUDA 12.x 只支持宿主 gcc<=12，
-# 目标机 Ubuntu 24.04 默认 gcc 13.3 → 需 gcc-12 隔离注入，否则 CMake enable_language(CUDA) 失败）
-# （CUDA_ENV 已在配置区初始化，此处仅校验）
-[ -n "$CUDA_ENV" ] || die "未找到 CUDA toolkit（/usr/local/cuda*）——需先装 CUDA 12.x/13.x（sudo apt install nvidia-cuda-toolkit 或 developer.nvidia.com）"
-
-nvcc_v=$(env $CUDA_ENV nvcc --version | grep -oE 'release [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
-cuda_major="${nvcc_v%%.*}"
-gcc_v=$(gcc --version | head -1 | grep -oE '[0-9]+' | head -1)
-gcc_limit=$(( cuda_major < 13 ? 12 : 13 ))
-say "nvcc $nvcc_v（CUDA 主版本 ${cuda_major}）→ 宿主 gcc 上限 $gcc_limit；当前 gcc $gcc_v"
-if [ "$gcc_v" -gt "$gcc_limit" ]; then
-  say "安装 gcc-$gcc_limit / g++-$gcc_limit 并隔离注入 PATH（不切换系统默认）..."
-  # 守卫必须分别独立判定（t48 真机实测：gcc-12 已存在时 `have gcc-12 || 装两个` 会跳过 g++-12，
-  # 导致 cc1plus 缺失 → CMake CUDA 编译器探测 `cannot execute cc1plus` 失败）
-  need_apt=""
-  have "gcc-$gcc_limit" || need_apt=1
-  have "g++-$gcc_limit" || need_apt=1
-  [ -n "$need_apt" ] && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "gcc-$gcc_limit" "g++-$gcc_limit"
-  # 双保险：缺哪个补哪个（apt 已有包会秒回）
-  have "g++-$gcc_limit" || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "g++-$gcc_limit"
-  # 装完必须存在 cc1plus（nvcc 的 host 编译器内部组件），否则 CUDA ID 探测必然失败
-  CC1PLUS=$(find /usr/lib/gcc /usr/libexec/gcc -path "*$gcc_limit/cc1plus" 2>/dev/null | head -1)
-  [ -n "$CC1PLUS" ] || die "g++-$gcc_limit 安装后 cc1plus 仍缺失（/usr/lib/gcc 下查找无果），无法编译 CUDA"
-  say "cc1plus 就绪: $CC1PLUS"
-  mkdir -p "$GCC_ISO"
-  # 隔离目录软链：cc-12/c++-12 在 Ubuntu 上不存在（t48 实测），
-  # cc→gcc-12、c++→g++-12、gcc→gcc-12、g++→g++-12——源不存在则不创建（避免悬空链接）
-  for pair in "gcc:gcc-$gcc_limit" "g++:g++-$gcc_limit" "cc:gcc-$gcc_limit" "c++:g++-$gcc_limit"; do
-    link_name="${pair%%:*}"; src="${pair##*:}"
-    src_path="$(command -v "$src" 2>/dev/null || true)"
-    if [ -n "$src_path" ]; then
-      ln -sf "$src_path" "$GCC_ISO/$link_name"
-    else
-      say "跳过软链 $link_name（源 $src 不存在，避免悬空）"
-    fi
-  done
-  # 把隔离目录插入 CUDA_ENV 的 PATH= 段前部（不能整体前缀：会产生 PATH=A:PATH=B 双前缀，
-  # env 解析会把第二个 PATH= 当命令参数，导致 CUDA bin 实际不进 PATH——t25 真机实测）
-  CUDA_ENV="PATH=$GCC_ISO:${CUDA_ENV#PATH=}"
-fi
-
-# ------------------------- 2. 克隆并编译 stable-diffusion.cpp -------------------------
-say "=== 编译 stable-diffusion.cpp（CUDA 版，首次约 10-20 分钟）==="
-if [ ! -d "$SDCPP_DIR/.git" ]; then
-  # --recursive 必需：sd.cpp 依赖 ggml 子模块，缺了 CMake 会报 ggml 无 CMakeLists（t25 真机实测）
-  git clone --depth 1 --recursive https://github.com/leejet/stable-diffusion.cpp "$SDCPP_DIR"
-else
-  # 已有 clone：补子模块；仅「上次编译失败残留」（build 有 CMakeCache 但无 sd-cli）才清 build，
-  # 否则 sd-cli 已生成时不做清理——避免每次重跑都花 10-20 分钟重编译（t48 真机实测）
-  cd "$SDCPP_DIR"
-  git submodule update --init --recursive 2>/dev/null || true
-  if [ -f build/CMakeCache.txt ] && [ ! -x build/bin/sd-cli ]; then
-    say "检测到上次失败的 build 残留（CMakeCache 存在但 sd-cli 缺失），清理后重新 configure..."
-    rm -rf build build-vision 2>/dev/null || true
+# ------------------------- 1. 构建 H3 镜像（CUDA 编译 sd.cpp 进 Dockerfile） -------------------------
+say "=== 构建镜像 ${H3_IMAGE}:${H3_TAG}（CUDA 编译 sd.cpp，首次约 10-20 分钟）==="
+if ! docker image inspect "$H3_IMAGE:$H3_TAG" >/dev/null 2>&1; then
+  mkdir -p "$H3_ROOT/docker"
+  cat > "$H3_ROOT/docker/Dockerfile" <<'DOCKEREOF'
+# CyberCafe H3 运行时镜像（t99）
+# CUDA 12.1 基底：与真机 12.2 toolchain 同代（sm_89 编译、535 驱动兼容，vLLM/SGLang 同基底先例）
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git cmake build-essential pkg-config curl ca-certificates \
+      python3 python3-pip libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+# 国内构建加速：CUDA 12.1 基底镜像源（aliyun 出口可达；HF 权重运行时 hf-mirror 拉取）
+RUN git config --global url."https://github.com".insteadOf "git@github.com:"
+WORKDIR /opt
+# --recursive 必需：sd.cpp 依赖 ggml 子模块（t25/t48 实测缺了 CMake 失败）
+RUN git clone --depth 1 --recursive https://github.com/leejet/stable-diffusion.cpp /opt/sd.cpp
+WORKDIR /opt/sd.cpp
+RUN mkdir -p build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON \
+       -DCMAKE_CUDA_ARCHITECTURES=89 >/dev/null \
+    && cmake --build . -j"$(nproc)" >/dev/null
+# 权重不在镜像内：运行时经命名卷挂载 /models（27GB 重装不重下载、镜像层瘦）
+VOLUME ["/models"]
+WORKDIR /opt/sd.cpp/build/bin
+EXPOSE 11435
+ENTRYPOINT ["./sd-server"]
+DOCKEREOF
+  if ! docker build -t "$H3_IMAGE:$H3_TAG" "$H3_ROOT/docker" > /tmp/h3-docker-build.log 2>&1; then
+    tail -25 /tmp/h3-docker-build.log >&2
+    h3_write_version "failed"
+    die "H3 镜像构建失败（见 /tmp/h3-docker-build.log）"
   fi
 fi
-cd "$SDCPP_DIR"
-mkdir -p build && cd build
-if [ ! -f bin/sd-cli ]; then
-  # 显式指定 nvcc 与 arch：避免 PATH 注入顺序/子进程环境差异导致 CMake 找不到 CUDA 编译器
-  NVCC_BIN=""
-  for c in /usr/local/cuda/bin/nvcc /usr/local/cuda-12.2/bin/nvcc; do [ -x "$c" ] && NVCC_BIN="$c" && break; done
-  env $CUDA_ENV cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON \
-      -DCMAKE_CUDA_COMPILER="$NVCC_BIN" -DCMAKE_CUDA_ARCHITECTURES=89 >/dev/null
-  env $CUDA_ENV cmake --build . -j"$(nproc)" >/dev/null
-fi
-[ -x bin/sd-cli ] || die "sd-cli 编译失败，见 $LOG"
-[ "$H3_SERVER" = 1 ] && { [ -x bin/sd-server ] || die "sd-server 编译失败"; }
-say "sd-cli/sd-server 就绪"
+say "镜像就绪: ${H3_IMAGE}:${H3_TAG}"
 
-# ------------------------- 3. 下载权重（hf-mirror，~29GB） -------------------------
-say "=== 下载权重（HF_ENDPOINT=${H3_ENDPOINT}，约 29GB，按需续传）==="
-# 下载守卫（t48 第 5 个真机缺陷修复）：文件名带档位/来源编码 + sidecar 记录 URL，
-# 换仓库/换量化档后旧文件不会被静默沿用（旧守卫只看「存在且 >1MB」，
-# 换源后同名文件会跳过导致继续用错误权重跑——曾让 t48 白下 25GB）。
-# dl <repo> <subpath> —— dest 名 = subpath 文件名，天然隔离不同档位/来源
+# ------------------------- 2. 权重卷（h3-weights）持久化初始化 -------------------------
+say "=== 权重卷 $H3_VOLUME 初始化（hf-mirror，~29GB；已存在则跳过下载）==="
+# 用一次性容器把权重下载到命名卷（dl .src 守卫：换仓库/换档/来源不符才重下，t48 修复语义）
+docker volume inspect "$H3_VOLUME" >/dev/null 2>&1 || docker volume create "$H3_VOLUME" >/dev/null
+DIFF_NAME="$(h3_diff_name "$H3_QUANT")"
+if ! docker run --rm --name h3-downloader \
+     -v "$H3_VOLUME:/models" \
+     -e H3_ENDPOINT="$H3_ENDPOINT" \
+     -e H3_QUANT="$H3_QUANT" \
+     --entrypoint /bin/bash \
+     "$H3_IMAGE:$H3_TAG" -c '
+set -euo pipefail
+MODELS=/models
+case "$H3_QUANT" in
+  UD-Q2_K_XL) DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf" ;;
+  UD-Q3_K_XL) DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-UD-Q3_K_XL.gguf" ;;
+  Q4_K_M)     DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-Q4_K.gguf" ;;
+  Q5_0)       DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-Q5_0.gguf" ;;
+  *) echo "未知 H3_QUANT=$H3_QUANT" >&2; exit 1 ;;
+esac
 dl() {
-  local url
-  url="$H3_ENDPOINT/$1/resolve/main/$2"
-  local dest
-  dest="$MODELS_DIR/$(basename "$2")"
+  local url="$H3_ENDPOINT/$1/resolve/main/$2"
+  local dest="$MODELS/$(basename "$2")"
   local srcfile="$dest.src"
   if [ ! -f "$dest" ] || [ -f "$srcfile" ] && [ "$(cat "$srcfile" 2>/dev/null)" != "$url" ]; then
-    say "下载 $(basename "$2") ..."
-    curl -fL --retry 5 --retry-delay 3 -C - -o "$dest" "$url" || die "下载失败: $url"
+    echo "下载 $(basename "$2") ..."
+    curl -fL --retry 5 --retry-delay 3 -C - -o "$dest" "$url"
     echo "$url" > "$srcfile"
   elif [ ! -f "$srcfile" ]; then
-    # 旧版本下载的文件无 .src 记录：重下一次确保来源正确
-    say "检测到旧版本残留（无来源记录），重下 $(basename "$2") ..."
-    curl -fL --retry 5 --retry-delay 3 -C - -o "$dest" "$url" || die "下载失败: $url"
+    echo "旧版残留（无来源记录），重下 $(basename "$2") ..."
+    curl -fL --retry 5 --retry-delay 3 -C - -o "$dest" "$url"
     echo "$url" > "$srcfile"
   fi
-  say "  就绪 $(basename "$2") ($(du -h "$dest" | cut -f1))"
 }
-case "$H3_QUANT" in
-  # 全部档位用 sd.cpp 兼容 GGUF 源（unsloth/leejet）；Abiray/MiniMax-H3-Pruned-GGUF 为 ComfyUI 布局，
-  # sd.cpp 加载报 model metadata validation failed（t48 真机实测），已从本脚本移除
-  UD-Q2_K_XL) DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf"; LLM_SUB="qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ;;
-  UD-Q3_K_XL) DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-UD-Q3_K_XL.gguf"; LLM_SUB="qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ;;
-  Q4_K_M) DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-Q4_K.gguf"; LLM_SUB="qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ;;
-  Q5_0)   DIFF_REPO="unsloth/MiniMax-H3-GGUF"; DIFF_FILE="minimax_h3_fl2va_pruned-Q5_0.gguf"; LLM_SUB="qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ;;
-  *) die "未知 H3_QUANT=$H3_QUANT（支持 UD-Q2_K_XL/UD-Q3_K_XL/Q4_K_M/Q5_0）" ;;
-esac
-# dest 名 = 文件原名（含档位/来源差异），冒烟与服务启动引用同一文件名
 dl "$DIFF_REPO" "$DIFF_FILE"
-dl "$H3_AUX_REPO"  "$LLM_SUB"
-dl "$H3_VAE_REPO"  "vae/minimax_h3_video_vae_fp16.safetensors"
-dl "$H3_VAE_REPO"  "vae/minimax_h3_audio_vae_fp32.safetensors"
-H3_DIFF_FILE="$MODELS_DIR/$(basename "$DIFF_FILE")"
-H3_LLM_FILE="$MODELS_DIR/$(basename "$LLM_SUB")"
-H3_VIDEO_VAE="$MODELS_DIR/minimax_h3_video_vae_fp16.safetensors"
-H3_AUDIO_VAE="$MODELS_DIR/minimax_h3_audio_vae_fp32.safetensors"
-
-# ------------------------- 4. 真实生成验证（CLI 冒烟） -------------------------
-say "=== 冒烟验证：文本→视频+音频生成（640x384，24帧，4步）==="
-SMOKE_OUT="$H3_ROOT/smoke_test.webm"
-env $CUDA_ENV "$SDCPP_DIR/build/bin/sd-cli" -M vid_gen \
-  --diffusion-model "$H3_DIFF_FILE" \
-  --vae "$H3_VIDEO_VAE" \
-  --audio-vae "$H3_AUDIO_VAE" \
-  --llm "$H3_LLM_FILE" \
-  --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu \
-  --prompt "a red fox trotting through falling snow, cinematic" \
-  --width 640 --height 384 --video-frames 25 --steps 4 --cfg-scale 1.0 \
-  --diffusion-fa --output "$SMOKE_OUT"
-[ -f "$SMOKE_OUT" ] && [ "$(stat -c%s "$SMOKE_OUT")" -gt 10000 ] || die "冒烟生成失败：$SMOKE_OUT 缺失或过小"
-say "冒烟通过：$SMOKE_OUT（$(du -h "$SMOKE_OUT" | cut -f1)）"
-
-# ------------------------- 5. 常驻 HTTP 服务（独立端口 11435） -------------------------
-if [ "$H3_SERVER" = 1 ]; then
-  say "=== 启动 sd-server（127.0.0.1:${H3_PORT}，独立端口避开 11434）==="
-  pkill -f "sd-server.*$H3_PORT" 2>/dev/null || true
-  env $CUDA_ENV nohup "$SDCPP_DIR/build/bin/sd-server" \
-    --diffusion-model "$H3_DIFF_FILE" \
-    --vae "$H3_VIDEO_VAE" \
-    --audio-vae "$H3_AUDIO_VAE" \
-    --llm "$H3_LLM_FILE" \
-    --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu \
-    --diffusion-fa --cfg-scale 1.0 \
-    --listen-ip 127.0.0.1 --listen-port "$H3_PORT" \
-    > "$H3_ROOT/sd-server.log" 2>&1 &
-  for _ in $(seq 1 30); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:$H3_PORT/v1/models" || true)
-    [ "$code" = 200 ] && break
-    sleep 2
-  done
-  [ "$code" = 200 ] || die "sd-server 未就绪（HTTP ${code}），见 $H3_ROOT/sd-server.log"
-  say "sd-server 就绪: http://127.0.0.1:$H3_PORT/v1/models → 200"
-  cat > "$H3_ROOT/README.local" <<EOF
-MiniMax-H3 本地服务（安装于 $(date)）
-- HTTP:      http://127.0.0.1:$H3_PORT/v1/models （独立端口，与四引擎 11434 无冲突）
-- 兼容:      OpenAI 形态 /v1/*、/sdapi/v1/*、/sdcpp/v1/vid_gen（文本→视频+音频）
-- 权重目录:  $MODELS_DIR
-- 冒烟产物:  $SMOKE_OUT
-- 停止:      bash uninstall.sh（全清）或 pkill -f sd-server
-EOF
+dl "unsloth/MiniMax-H3-GGUF" "qwen3vl_32b_minimax_h3-Q2_K_M.gguf"
+dl "Comfy-Org/MiniMax-H3" "vae/minimax_h3_video_vae_fp16.safetensors"
+dl "Comfy-Org/MiniMax-H3" "vae/minimax_h3_audio_vae_fp32.safetensors"
+echo "权重就绪"
+' > /tmp/h3-weights-init.log 2>&1; then
+  tail -12 /tmp/h3-weights-init.log >&2
+  h3_write_version "failed"
+  die "权重卷初始化失败（见 /tmp/h3-weights-init.log）"
 fi
+say "权重卷就绪: ${H3_VOLUME}（$(docker run --rm -v "$H3_VOLUME:/models" --entrypoint du "$H3_IMAGE:$H3_TAG" -sh /models 2>/dev/null | awk '{print $1}')）"
 
-say "=== 安装完成 ==="
-say "冒烟产物: $SMOKE_OUT"
-[ "$H3_SERVER" = 1 ] && say "HTTP:     http://127.0.0.1:$H3_PORT/v1/models"
-say "权重:     $MODELS_DIR  （uninstall.sh 一键全清）"
-# 组件状态标记（t74）：写 .version 供 agent 心跳 components.h3 读取；
-# state：H3_SERVER=1 且服务就绪→running，否则 installed（仅 CLI 验证）
-if [ "$H3_SERVER" = 1 ]; then
-  h3_write_version "running"
-else
-  h3_write_version "installed"
+# ------------------------- 3. 启动容器（--gpus all，暴露 11435） -------------------------
+say "=== 启动 ${H3_CONTAINER}（--gpus all，127.0.0.1:${H3_PORT} → 容器 11435）==="
+docker rm -f "$H3_CONTAINER" >/dev/null 2>&1 || true
+if ! h3_run_server "$DIFF_NAME" > /dev/null 2>&1; then
+  docker logs "$H3_CONTAINER" 2>&1 | tail -15 >&2 || true
+  h3_write_version "failed"
+  die "H3 容器启动失败（docker logs $H3_CONTAINER）"
 fi
-say "组件状态已写: $H3_VERSION_FILE（state=$( [ "$H3_SERVER" = 1 ] && echo running || echo installed )）"
-# 卸载脚本落位：uninstall-all.sh 的 SUB_UNINSTALLS 固定引用 /opt/minimax-h3/uninstall.sh
-# （t28 约定），必须与 H3_ROOT 一致，否则统一卸载会漏掉本模型
+if ! h3_wait_ready; then
+  docker logs "$H3_CONTAINER" 2>&1 | tail -15 >&2 || true
+  h3_write_version "failed"
+  die "sd-server 未就绪（HTTP 超时），见 docker logs $H3_CONTAINER"
+fi
+say "sd-server 就绪: http://127.0.0.1:${H3_PORT}/v1/models → 200"
+h3_write_version "running"
+
+# 卸载脚本落位：uninstall-all.sh 的 SUB_UNINSTALLS 固定引用 /opt/minimax-h3/uninstall.sh（t28 约定）
 SCRIPT_SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 SCRIPT_DIR="$(dirname "$SCRIPT_SELF")"
 if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
   cp -f "$SCRIPT_DIR/uninstall.sh" "$H3_ROOT/uninstall.sh"
   chmod +x "$H3_ROOT/uninstall.sh"
-  say "卸载脚本已落位: $H3_ROOT/uninstall.sh（uninstall-all.sh 统一卸载可命中）"
-elif [ "$H3_ROOT" = /opt/minimax-h3 ] && [ -f /root/h3-delivery/uninstall.sh ]; then
+elif [ -f /root/h3-delivery/uninstall.sh ]; then
   cp -f /root/h3-delivery/uninstall.sh "$H3_ROOT/uninstall.sh"
   chmod +x "$H3_ROOT/uninstall.sh"
-  say "卸载脚本已落位（h3-delivery）: $H3_ROOT/uninstall.sh"
-else
-  say "提示: 未在脚本同目录找到 uninstall.sh，统一卸载（uninstall-all.sh）将只删目录；"
-  say "      可手动 cp uninstall.sh $H3_ROOT/uninstall.sh"
 fi
+
+say "=== 安装完成 ==="
+say "HTTP:     http://127.0.0.1:${H3_PORT}/v1/models"
+say "容器:     ${H3_CONTAINER}（镜像 ${H3_IMAGE}:${H3_TAG}）"
+say "权重卷:   ${H3_VOLUME}（重装不重下载；当前部署保护，非当前可回收）"
+say "卸载:     bash install.sh uninstall 或 bash uninstall.sh（docker rm -f + rmi）"
