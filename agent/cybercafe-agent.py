@@ -556,6 +556,7 @@ def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
     payload = {"deploy": {"state": "online" if ok else "failed",
                           "type": "engine",   # t78 唯一部署槽：类型权威字段
                           "engine": engine, "model": model,
+                          "version": None,    # t85 F2：失败/成功都清陈旧组件 version，防「vocr-x · failed」残留
                           "tunnel_url": tunnel_url,
                           "model_api_key": api_key, "ts": int(time.time())}}
     # 结果心跳为单次投递：真机偶发 TLS 握手超时（t4 实测复现）会整包丢失，
@@ -1072,6 +1073,10 @@ def handle_command(cmd):
             rc = run_ocr(action)
             if rc != 0:
                 report_progress("ocr", "fail", "OCR %s 失败（rc=%d）" % (action, rc))
+                # t85 F2：失败后唯一部署槽显示本次失败目标（type=ocr + failed，version 清空）
+                _clear_component_deploy()
+                heartbeat({"deploy": {"type": "ocr", "state": "failed", "version": None,
+                                      "ts": int(time.time())}})
             else:
                 log("OCR %s 完成" % action)
         elif ctype == "h3":
@@ -1084,6 +1089,10 @@ def handle_command(cmd):
             rc = run_h3(action)
             if rc != 0:
                 report_progress("h3", "fail", "H3 %s 失败（rc=%d）" % (action, rc))
+                # t85 F2：失败后唯一部署槽显示本次失败目标（type=h3 + failed，version 清空）
+                _clear_component_deploy()
+                heartbeat({"deploy": {"type": "h3", "state": "failed", "version": None,
+                                      "ts": int(time.time())}})
             else:
                 log("H3 %s 完成" % action)
         else:
@@ -1093,6 +1102,11 @@ def handle_command(cmd):
         log("指令执行失败: %s" % e)
         traceback.print_exc()
         report_progress("command", "fail", str(e)[:300])
+        # t85 F2：异常路径按指令类型如实上报失败槽位（引擎/OCR/H3），version 清空
+        fail_type = "engine" if ctype == "deploy" else (ctype if ctype in ("ocr", "h3") else "engine")
+        _clear_component_deploy()
+        heartbeat({"deploy": {"type": fail_type, "state": "failed", "version": None,
+                              "ts": int(time.time())}})
         report_deploy_result(False, model=cmd.get("model", ""))
 
 def main():

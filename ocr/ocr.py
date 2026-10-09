@@ -106,13 +106,28 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 静默访问日志（systemd journal 已够）
         pass
 
+    def _cors(self):
+        # t85 F1：OCR 经隧道从浏览器跨域直连——响应必须带 CORS 头（允许 UI 来源或 *）
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "86400")
+
     def _send(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
+        self._cors()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        # t85 F1：浏览器跨域预检（application/json POST 先发 OPTIONS）→ 200 + CORS 头
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         if self.path == "/health":
