@@ -12,4 +12,10 @@ fi
 if [ -n "${AGENT_LOCAL_BASE:-}" ]; then
     echo "AGENT_LOCAL_BASE=${AGENT_LOCAL_BASE}" >> /app/cloud/.dev.vars
 fi
+# AGENT_LOCAL_ROOT_BASE（compose 挂载仓库根 → public/_repo）：根目录通道（t41，
+# ocr/*、minimax-h3/*、uninstall-all.sh）——漏注入会让根通道跳过本地、走 jsDelivr
+# 12h 旧缓存（t88：生产 OCR 下发到无 CORS 旧版 ocr.py 的根因），必须同款注入
+if [ -n "${AGENT_LOCAL_ROOT_BASE:-}" ]; then
+    echo "AGENT_LOCAL_ROOT_BASE=${AGENT_LOCAL_ROOT_BASE}" >> /app/cloud/.dev.vars
+fi
 exec wrangler dev --port 8080 --ip 0.0.0.0 --persist-to /data
