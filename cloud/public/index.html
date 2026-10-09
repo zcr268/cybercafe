@@ -773,7 +773,7 @@ async function send() {
       headers: { "Content-Type": "application/json",
                  "Authorization": "Bearer " + (d.deploy.model_api_key || "") },
       body: JSON.stringify({
-        model: d.deploy.model || (d.deploy.type === "h3" ? "sd" : ""),
+        model: d.deploy.model || (d.deploy.type === "h3" ? "sd-cpp-local" : ""),
         messages: [{ role: "user", content: text }],
         stream: true,
         stream_options: { include_usage: true },   // 让 vllm/sglang/ollama 在末块带 usage；strata 同协议

@@ -993,14 +993,19 @@ def _clear_component_deploy():
 
 def _stop_engine_containers():
     """互斥：停引擎容器 + 网关/隧道（L3 cmd_stop 同款清单，best-effort）"""
-    run("docker rm -f ollama vllm-openai sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
+    # t91：容器名与 L3 ENGINES 配置一致（真实为 vllm，非 vllm-openai——旧清单漏停 vllm）
+    run("docker rm -f ollama vllm sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
 
 def _stop_ocr_server():
-    """互斥：停 OCR 服务（ocr.pid 优先，pkill 兜底）"""
-    run("if [ -f /opt/cybercafe-ocr/ocr.pid ]; then kill -9 $(cat /opt/cybercafe-ocr/ocr.pid) 2>/dev/null || true; fi; pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
+    """互斥：停 OCR 服务——真机为 systemd 单元（t92：systemctl stop 优先），pkill 兜底"""
+    run("systemctl stop cybercafe-ocr.service 2>/dev/null || true; "
+        "if [ -f /opt/cybercafe-ocr/ocr.pid ]; then kill -9 $(cat /opt/cybercafe-ocr/ocr.pid) 2>/dev/null || true; fi; "
+        "pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
 
 def _stop_h3_process():
-    """互斥：停 H3 进程（install.sh stop 子命令，脚本未拉取则跳过）"""
+    """互斥：停 H3 进程——真机 systemd 单元优先（t92），install.sh stop 子命令兜底"""
+    run("systemctl stop minimax-h3.service 2>/dev/null || true; "
+        "systemctl stop cybercafe-h3.service 2>/dev/null || true", timeout=30)
     if os.path.exists(_H3_SRC_DIR + "/install.sh"):
         run("bash " + _H3_SRC_DIR + "/install.sh stop >/dev/null 2>&1 || true", timeout=120)
 
@@ -1022,24 +1027,48 @@ def _stop_other_deployments(target):
 
 def _start_component_tunnel(port):
     """组件部署建机器隧道（trycloudflare）暴露组件 API（H3=11435 / OCR=8820）；
-    限时等待 URL（40s 硬上限），取不到如实返回 None（部署状态照常写入，UI 显示无隧道）。"""
+    限时等待 URL（40s 硬上限），取不到如实返回 None（部署状态照常写入，UI 显示无隧道）。
+    t93：镜像 L3 step_tunnel 用 docker cloudflared（真机 cloudflared 以 docker 形态运行，
+    裸二进制不存在）；无 docker 环境（沙箱）回退裸二进制。"""
     _stop_tunnel()
-    run("cloudflared tunnel --no-autoupdate --url http://127.0.0.1:%d >> /tmp/cc-tunnel.log 2>&1 &" % port, timeout=10)
-    deadline = time.time() + 40
     url = None
-    while time.time() < deadline:
-        try:
-            with open("/tmp/cc-tunnel.log") as f:
-                for line in f:
-                    i = line.find("https://")
-                    if i >= 0 and "trycloudflare.com" in line[i:]:
-                        url = line[i:].strip().split()[0]
-                        break
-        except Exception:
-            pass
-        if url:
-            break
-        time.sleep(2)
+    has_docker = run("docker info >/dev/null 2>&1", timeout=15)[0] == 0
+    if has_docker:
+        run("docker rm -f cloudflared 2>/dev/null || true", timeout=30)
+        rc, out = run("docker run -d --name cloudflared --network host --restart unless-stopped "
+                      "cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://127.0.0.1:%d" % port,
+                      timeout=120)
+        if rc == 0:
+            deadline = time.time() + 40
+            while time.time() < deadline:
+                t, out2 = run("docker logs --tail 50 cloudflared 2>&1", timeout=15)
+                m = __import__("re").search(r"https://[a-z0-9-]+\.trycloudflare\.com", out2)
+                if m:
+                    url = m.group(0)
+                    break
+                time.sleep(3)
+        else:
+            log("组件隧道 docker cloudflared 启动失败: %s" % out[-120:])
+    else:
+        rc, out = run("command -v cloudflared >/dev/null 2>&1", timeout=10)
+        if rc == 0:   # 沙箱回退：裸二进制
+            run("cloudflared tunnel --no-autoupdate --url http://127.0.0.1:%d >> /tmp/cc-tunnel.log 2>&1 &" % port, timeout=10)
+            deadline = time.time() + 40
+            while time.time() < deadline:
+                try:
+                    with open("/tmp/cc-tunnel.log") as f:
+                        for line in f:
+                            i = line.find("https://")
+                            if i >= 0 and "trycloudflare.com" in line[i:]:
+                                url = line[i:].strip().split()[0]
+                                break
+                except Exception:
+                    pass
+                if url:
+                    break
+                time.sleep(2)
+        else:
+            log("组件隧道不可用：无 docker 且无 cloudflared 二进制")
     if not url:
         log("组件隧道启动超时（40s 未取到 trycloudflare URL）")
     return url
