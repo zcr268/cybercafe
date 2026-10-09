@@ -630,13 +630,13 @@ async function fillDetail(id) {
   await ensureScripts();   // 一致性比对需 /api/admin/scripts（best-effort，失败 → '—'，不报错）
   const d = devices.find(x => x.device_id === id) || {};
   // t78 UI 反馈：详情折叠用深色面板配色（#0f172a 同页头脚本面板）；内含 详情|日志 两个 tab
-  tr.innerHTML = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px">
+  tr.innerHTML = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
     <div class="row" style="margin-bottom:6px">
       <button class="sm" id="tabA_${id}" onclick="switchTab('${id}','A')">详情</button>
       <button class="sm gray" id="tabB_${id}" onclick="switchTab('${id}','B')">日志</button>
     </div>
     <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0">${layersDetail(d)}</div>
-    <div id="tabB_${id}_body" style="display:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
+    <div id="tabB_${id}_body" style="display:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
   </td>`;
   await loadLogTab(id);
 }
