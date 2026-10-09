@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -424,9 +424,76 @@ def register():
     log("register failed: %s %s" % (st, raw[:300]))
     return False
 
+def _sha8(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:8]
+    except Exception:
+        return None
+
+def _version_line(path):
+    """脚本头部 # Version: X.Y.Z 版本行（缺省返回 None）"""
+    try:
+        with open(path, "r", errors="replace") as f:
+            for line in f:
+                if line.startswith("# Version:"):
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+_layers_cache = {"ts": 0.0, "data": None}
+
+def collect_layers(force=False):
+    """L1/L2 分层脚本状态（心跳 device.layers 用，与 usage 同级）。
+
+    L1：本机 install.sh / provision.sh 的版本行 + sha256 前 8；systemd 两单元
+        （cybercafe-agent.service / cybercafe-provision.service）active/enabled。
+    L2：agent 自身 VERSION + sha256 前 8；更新通道状态（batch.code 或 config.env
+        BATCH_CODE 存在=armed；/etc/cybercafe/self_update=off=off；否则 dormant）；
+        脚本最近更新时间（install.sh/provision.sh/agent 文件 mtime 最大值）。
+    节流：systemctl 是子进程重操作，60s 缓存；agent 启动与 update_managed_scripts
+    更新脚本后 force 刷新（避免每 10s 心跳明显开销）。"""
+    global _layers_cache
+    now = time.time()
+    if not force and _layers_cache["data"] is not None and now - _layers_cache["ts"] < 60:
+        return _layers_cache["data"]
+    paths = [
+        ("install", "/opt/cybercafe/install.sh"),
+        ("provision", "/opt/cybercafe/provision.sh"),
+        ("agent", os.path.abspath(__file__)),
+    ]
+    scripts, mt = {}, 0.0
+    for key, p in paths:
+        ver = VERSION if key == "agent" else _version_line(p)
+        sha = _sha8(p)
+        try:
+            mt = max(mt, os.path.getmtime(p))
+        except Exception:
+            pass
+        scripts[key] = {"version": ver, "sha8": sha}
+    units = {}
+    for u in ("cybercafe-agent.service", "cybercafe-provision.service"):
+        rc_a, out_a = run("systemctl is-active %s" % u, timeout=15)
+        rc_e, out_e = run("systemctl is-enabled %s" % u, timeout=15)
+        units[u] = {"active": out_a.strip() if rc_a == 0 else "inactive",
+                    "enabled": out_e.strip() if rc_e == 0 else "disabled"}
+    if _self_update_off():
+        channel = "off"
+    elif _is_batch_machine():
+        channel = "armed"
+    else:
+        channel = "dormant"
+    data = {"install": scripts["install"], "provision": scripts["provision"],
+            "agent": scripts["agent"], "units": units, "channel": channel,
+            "last_update": int(mt) if mt > 0 else None}
+    _layers_cache = {"ts": now, "data": data}
+    return data
+
 def heartbeat(extra=None):
     payload = {"device": {"device_id": device_id(), "agent_version": VERSION,
-                          "last_seen": int(time.time()), "usage": collect_usage()}}
+                          "last_seen": int(time.time()), "usage": collect_usage(),
+                          "layers": collect_layers()}}
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -557,6 +624,7 @@ def update_managed_scripts():
                 continue
             if _atomic_write(local, src, item.get("mode", 0o644)):
                 log("脚本已更新: %s（sha256 %s…）" % (item["name"], hashlib.sha256(src.encode("utf-8", "replace")).hexdigest()[:8]))
+                collect_layers(force=True)   # 脚本更新后强制刷新 L1/L2（避免 60s 缓存陈旧）
                 if item["name"] == "provision.sh":
                     _ensure_provision_unit()
         except Exception as e:
@@ -726,6 +794,7 @@ def main():
         if register():
             break
         time.sleep(10)
+    collect_layers(force=True)   # 启动强制刷新 L1/L2（预热 60s 缓存，首心跳即上报最新状态）
     last_boot = 0.0            # 统一脚本更新：启动即检一次，此后每 10 分钟低频自检
     poll = HEARTBEAT_INTERVAL
     while True:

@@ -189,6 +189,17 @@ $("btnScripts").onclick = async () => {
   if (panel.style.display !== "none") await loadScriptsPanel();
 };
 
+let scriptsMap = null;   // /api/admin/scripts → {name: sha8}，供 L1/L2 一致性比对（UI 侧，best-effort）
+async function ensureScripts() {
+  if (scriptsMap) return scriptsMap;
+  try {
+    const j = await api("/api/admin/scripts");
+    scriptsMap = {};
+    (j.scripts || []).forEach(x => { if (x && x.name) scriptsMap[x.name] = x.sha; });
+  } catch (e) { scriptsMap = null; }
+  return scriptsMap;
+}
+
 async function loadScriptsPanel() {
   try {
     const j = await api("/api/admin/scripts");
@@ -408,10 +419,13 @@ function renderDevices() {
       <br><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}
       <br><span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
       ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}` : "";
+    const ly = d.layers || {};
+    const lyLine = (ly.install || ly.provision || ly.agent)
+      ? `<div style="font-size:11px;color:#64748b;margin-top:2px">L1 v${esc((ly.install||{}).version||"—")} · v${esc((ly.provision||{}).version||"—")} · L2 v${esc((ly.agent||{}).version||"—")}${ly.channel ? ` · 通道 ${esc(ly.channel)}` : ""}</div>` : "";
     return `<tr>
       <td><span class="dot ${isOn ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
-          <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span></td>
+          <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}</td>
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
       <td><span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}</td>
       <td><div class="row">
@@ -420,10 +434,12 @@ function renderDevices() {
         <button class="sm" onclick="deploy('${d.device_id}')">部署</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
+        <button class="sm gray" onclick="toggleDetail('${d.device_id}')">详情</button>
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
       </div></td>
-    </tr>`;
+    </tr>
+    <tr id="detail_${d.device_id}" style="display:none"></tr>`;
   }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
 }
 
@@ -465,6 +481,40 @@ window.delDev = async id => {
     if (logDevice === id) { clearInterval(logTimer); logTimer = null; logDevice = null; $("logWho").textContent = ""; $("logbox").textContent = "（点击设备行的「日志」查看）"; }
     refresh();
   } catch (e) { toast(e.message, false); }
+};
+function layersDetail(d) {
+  const ly = d.layers || {};
+  const cell = (label, s, cloudName) => {
+    const v = s.version || "—", sh = s.sha8 || "—";
+    let mark = "—";
+    const cloudSha = scriptsMap ? (scriptsMap[cloudName] || null) : null;
+    if (sh !== "—" && cloudSha) mark = (sh === cloudSha) ? "✓ 一致" : "⚠ 落后";
+    return `<tr><td>${label}</td><td class="mono">${esc(v)}</td><td class="mono">${esc(sh)}</td><td>${mark}</td></tr>`;
+  };
+  const units = ly.units || {};
+  const unitRows = Object.keys(units).map(u => {
+    const x = units[u] || {};
+    return `<tr><td class="mono">${esc(u)}</td><td colspan="3">${esc(x.active||"—")} · ${esc(x.enabled||"—")}</td></tr>`;
+  }).join("");
+  const lastUpd = ly.last_update ? ago(ly.last_update) : "—";
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr><th align="left">脚本</th><th align="left">版本</th><th align="left">sha8</th><th align="left">与云端一致</th></tr>
+    ${cell("L1 install.sh", ly.install || {}, "install.sh")}
+    ${cell("L1 provision.sh", ly.provision || {}, "provision.sh")}
+    ${cell("L2 agent", ly.agent || {}, "cybercafe-agent.py")}
+    ${unitRows}
+    <tr><td>更新通道</td><td colspan="3">${esc(ly.channel||"—")}</td></tr>
+    <tr><td>脚本最近更新</td><td colspan="3">${lastUpd}</td></tr>
+  </table>`;
+}
+window.toggleDetail = async id => {
+  const tr = $("detail_" + id);
+  if (!tr) return;
+  if (tr.style.display !== "none") { tr.style.display = "none"; return; }
+  await ensureScripts();   // 一致性比对需 /api/admin/scripts（best-effort，失败 → '—'，不报错）
+  const d = devices.find(x => x.device_id === id) || {};
+  tr.innerHTML = `<td colspan="4" style="background:#f8fafc;padding:8px 12px">${layersDetail(d)}</td>`;
+  tr.style.display = "";
 };
 window.viewLog = id => {
   logDevice = id; $("logWho").textContent = "· " + id;
