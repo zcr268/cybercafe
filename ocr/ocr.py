@@ -111,8 +111,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        # t79 F1：OCR 经组件隧道被页面跨域 fetch（浏览器 CORS）——补 ACAO 头，
+        # 与 H3 sd-server（sd.cpp 自带 ACAO+OPTIONS 204）行为对齐
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        # t79 F1：浏览器对 application/json POST 的预检请求；直接 204 通过（头已在 _send 同款设置）
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         if self.path == "/health":
