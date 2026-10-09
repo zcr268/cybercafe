@@ -107,8 +107,7 @@
       <thead><tr><th>设备</th><th>硬件</th><th>部署状态</th><th>操作</th></tr></thead>
       <tbody id="devRows"></tbody>
     </table>
-    <h2 style="margin-top:18px">部署进度日志 <span id="logWho" class="mono" style="color:#64748b"></span></h2>
-    <div id="logbox">（点击设备行的「日志」查看）</div>
+    <!-- t78：日志已并入设备详情折叠的「日志」tab（同一个折叠内 详情|日志 切换） -->
   </div>
 
   <div class="col-right">
@@ -122,6 +121,13 @@
       <div class="chatin">
         <input type="text" id="chatIn" placeholder="输入消息，回车发送…">
         <button id="btnSend">发送</button>
+        <div id="ocrIn" style="display:none;margin-top:6px">
+          <input type="text" id="ocrUrl" placeholder="图片 URL（或粘贴 base64）…" style="width:100%">
+          <div style="margin-top:4px">
+            <input type="file" id="ocrFile" accept="image/*">
+            <button id="btnOcr">识别图片</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -145,6 +151,9 @@
 const $ = id => document.getElementById(id);
 let token = localStorage.getItem("cc_admin_token") || "";
 let devices = [], engines = {}, logDevice = null, logTimer = null;
+// t78 UI 反馈：折叠展开态集合（跨轮询/刷新保持）+ 每设备日志 tab 轮询
+const expandedDevs = new Set();
+const logIntervals = {};
 
 function toast(msg, ok=true) {
   const t = $("toast"); t.textContent = msg;
@@ -425,37 +434,37 @@ function renderDevices() {
     const badgeLine = `<br><span>${["strata", "ollama"].map(badge).join(" · ")}</span>`;
     const ocr = (d.components || {}).ocr || {};
     const ocrSt = ocr.state || "uninstalled";
-    const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
-      : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
     const ocrBtns = ocrSt === "installed"
       ? `<button class="sm gray" onclick="ocrCmd('${d.device_id}','uninstall')">卸载</button>`
-      : ocrSt === "uninstalled" ? `<button class="sm" onclick="ocrCmd('${d.device_id}','install')">安装</button>` : "";
-    const ocrLine = `<br><span style="font-size:12px"><b>OCR</b>: ${esc(ocrLabel)} ${ocrBtns}</span>`;
-    // t74：H3 组件——四态（未安装/构建中/已安装/运行中）+ 版本，行内按钮（安装/卸载/启停）
-    // 状态由设备记录 components.h3 驱动（agent 心跳读 /opt/minimax-h3/.version），缺字段 fallback 未安装
+      : ocrSt === "uninstalled" ? `<button class="sm" onclick="ocrCmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(ocrSt)}</span>`;
     const h3 = (d.components || {}).h3 || {};
     const h3St = h3.state || "uninstalled";
-    const h3Ver = h3.version || "";
-    const h3Label = h3St === "running" ? `H3 运行中 ${h3Ver}`
-      : h3St === "installed" ? `H3 已安装 ${h3Ver}`
-      : h3St === "installing" ? "H3 构建中…" : h3St === "uninstalling" ? "H3 卸载中…" : "H3 未安装";
     const h3Btns = h3St === "running"
       ? `<button class="sm gray" onclick="h3Cmd('${d.device_id}','stop')">停止</button> <button class="sm gray" onclick="h3Cmd('${d.device_id}','uninstall')">卸载</button>`
       : h3St === "installed"
         ? `<button class="sm" onclick="h3Cmd('${d.device_id}','start')">启动</button> <button class="sm gray" onclick="h3Cmd('${d.device_id}','uninstall')">卸载</button>`
-        : h3St === "uninstalled" ? `<button class="sm" onclick="h3Cmd('${d.device_id}','install')">安装</button>` : "";
-    const h3Line = `<br><span style="font-size:12px"><b>H3</b>: ${esc(h3Label)} ${h3Btns}</span>`;
-    // 未知态也不隐藏（无驱动 → '?'，不误报）；OCR/H3 行缺字段 → 未安装态 + 安装按钮
-    const compLine = badgeLine + ocrLine + h3Line;
+        : h3St === "uninstalled" ? `<button class="sm" onclick="h3Cmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(h3St)}</span>`;
+    const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
+      : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
+    // t78 唯一部署模型：OCR/H3 不再独立区块/行——按钮并入「操作」列的部署入口（引擎选择同一处），
+    // 状态并入下方唯一「当前部署」槽；此处只保留引擎兼容徽标
+    const compLine = badgeLine;
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
     const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
-    // 部署状态/进度条仅在设备在线时展示；离线明确显示「离线」，不残留旧的 dep.state=online
+    // t78 唯一部署槽：引擎/OCR/H3/无 + 状态 + 版本（组件 deploy 由 agent 上报 type/state/version）
+    const depType = dep.type || (dep.engine ? "engine" : "");
+    const depComp = depType === "ocr" ? "OCR" : depType === "h3" ? "H3" : depType === "engine" ? `${dep.engine} ${dep.model||""}` : "";
+    const slotLine = depComp
+      ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
+      : `<br><span style="font-size:12px;color:#64748b">当前部署: 无</span>`;
+    // 部署状态/进度条仅在设备在线且引擎部署时展示（组件状态机 installing→installed/running 无进度条）
+    const isEngine = depType === "engine";
     const deployInfo = isOn ? `
-      <br><span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}
-      <br><span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>
-      ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}` : "";
+      ${isEngine ? `<span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}` : ""}
+      ${isEngine ? `<br><span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>` : ""}
+      ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}${slotLine}` : "";
     const ly = d.layers || {};
     const lyLine = (ly.install || ly.provision || ly.agent)
       ? `<div style="font-size:11px;color:#64748b;margin-top:2px">L1 v${esc((ly.install||{}).version||"—")} · v${esc((ly.provision||{}).version||"—")} · L2 v${esc((ly.agent||{}).version||"—")}${ly.channel ? ` · 通道 ${esc(ly.channel)}` : ""}</div>` : "";
@@ -474,21 +483,40 @@ function renderDevices() {
         <button class="sm gray" onclick="toggleDetail('${d.device_id}')">详情</button>
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
+        <br><span style="font-size:11px;color:#94a3b8">OCR:</span> ${ocrBtns} <span style="font-size:11px;color:#94a3b8">H3:</span> ${h3Btns}
       </div></td>
     </tr>
-    <tr id="detail_${d.device_id}" style="display:none"></tr>`;
+    <tr id="detail_${d.device_id}" style="display:${expandedDevs.has(d.device_id) ? "" : "none"}"></tr>`;
   }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
+  // t78 UI 反馈：折叠展开态跨轮询/刷新保持（用户手动关），刷新后重填展开内容
+  expandedDevs.forEach(id => { fillDetail(id); });
 }
 
+// t78：聊天窗按所选设备「当前部署」类型切换交互形态（引擎/H3=文本、OCR=图片），仍一个窗口
+function chatLabel(d) {
+  const dep = d.deploy || {};
+  if (dep.type === "ocr") return `OCR ${dep.version || ""}`;
+  if (dep.type === "h3") return `H3 ${dep.version || ""}`;
+  return `${dep.engine || ""} ${dep.model || ""}`;
+}
+function updateChatMode(d) {
+  const isOcr = !!(d && d.deploy && d.deploy.type === "ocr");
+  const m = d && d.deploy ? d.deploy : null;
+  $("ocrIn").style.display = isOcr ? "" : "none";
+  $("chatIn").style.display = isOcr ? "none" : "";
+  $("btnSend").style.display = isOcr ? "none" : "";
+  $("chatMeta").textContent = !d ? "无在线模型设备"
+    : (isOcr ? "OCR 图片识别 → 文字回显" : "文本聊天") + " · " + ((m && m.tunnel_url) || "");
+}
 function renderChatDevs() {
-  // 聊天下拉：仅心跳在线（d.online）且存在可用隧道（含 model_api_key 依赖的 deploy 全量上报）的设备
-  const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url));
+  // 聊天下拉：在线 + 有隧道 + 引擎/H3/OCR 当前部署之一（t78 唯一部署模型）
+  const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url) &&
+    (d.deploy.engine || d.deploy.type === "h3" || d.deploy.type === "ocr"));
   const sel = $("chatDev");
   const cur = sel.value;
-  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(d.deploy.engine||"")} · ${esc(d.deploy.model||"")}）</option>`).join("");
+  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(chatLabel(d))}）</option>`).join("");
   if (online.find(d => d.device_id === cur)) sel.value = cur;
-  const d = online.find(x => x.device_id === sel.value);
-  $("chatMeta").textContent = d ? `${d.deploy.engine||""} ${d.deploy.tunnel_url}` : "无在线模型设备";
+  updateChatMode(online.find(x => x.device_id === sel.value));
 }
 
 window.engineChanged = id => {
@@ -505,6 +533,35 @@ window.deploy = async id => {
   try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine, model }) });
         toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
+};
+function fileToBase64(f) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1] || "");
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
+}
+window.ocrSend = async () => {
+  const id = $("chatDev").value;
+  const d = devices.find(x => x.device_id === id);
+  const turl = safeUrl(d && d.online === true && d.deploy && d.deploy.tunnel_url);
+  if (!turl) { toast("该设备没有可用隧道地址", false); return; }
+  const urlv = $("ocrUrl").value.trim();
+  const file = $("ocrFile").files[0];
+  if (!urlv && !file) { toast("请输入图片 URL 或选择图片文件", false); return; }
+  const payload = {};
+  if (file) payload.image_base64 = await fileToBase64(file);
+  else payload.url = urlv;
+  addMsg("user", (file ? "📷 " + file.name : "🔗 " + urlv));
+  const bot = addMsg("bot", "识别中…");
+  try {
+    const r = await fetch(turl + "/ocr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok !== true) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
+    bot.textContent = j.text || "(未识别到文字)";
+  } catch (e) { bot.textContent = "错误: " + e.message; }
+  $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 window.ocrCmd = async (id, action) => {
   try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "ocr", action }) });
@@ -526,7 +583,8 @@ window.delDev = async id => {
   if (!confirm("删除设备 " + id + " 的记录？（不会卸载机器上的脚本）")) return;
   try {
     await api("/api/admin/device/" + id, { method: "DELETE" });
-    if (logDevice === id) { clearInterval(logTimer); logTimer = null; logDevice = null; $("logWho").textContent = ""; $("logbox").textContent = "（点击设备行的「日志」查看）"; }
+    if (expandedDevs.has(id)) expandedDevs.delete(id);
+    if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
     refresh();
   } catch (e) { toast(e.message, false); }
 };
@@ -563,29 +621,59 @@ function layersDetail(d) {
     <tr><td>脚本最近更新</td><td colspan="3">${lastUpd}</td></tr>
   </table>`;
 }
-window.toggleDetail = async id => {
+async function loadLogTab(id) {
+  const body = $("tabB_" + id + "_body");
+  if (!body) return;
+  try {
+    const j = await api("/api/admin/device/" + id);
+    body.innerHTML = (j.logs || []).map(l =>
+      `<div>[${new Date(l.ts*1000).toLocaleTimeString()}] <b>${esc(l.step)}</b> ${esc(l.state)} — ${esc(l.detail)}</div>`).join("")
+      || "（暂无日志）";
+    body.scrollTop = body.scrollHeight;
+  } catch (e) {}
+}
+async function fillDetail(id) {
   const tr = $("detail_" + id);
   if (!tr) return;
-  if (tr.style.display !== "none") { tr.style.display = "none"; return; }
   await ensureScripts();   // 一致性比对需 /api/admin/scripts（best-effort，失败 → '—'，不报错）
   const d = devices.find(x => x.device_id === id) || {};
-  tr.innerHTML = `<td colspan="4" style="background:#f8fafc;padding:8px 12px">${layersDetail(d)}</td>`;
+  // t78 UI 反馈：详情折叠用深色面板配色（#0f172a 同页头脚本面板）；内含 详情|日志 两个 tab
+  tr.innerHTML = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
+    <div class="row" style="margin-bottom:6px">
+      <button class="sm" id="tabA_${id}" onclick="switchTab('${id}','A')">详情</button>
+      <button class="sm gray" id="tabB_${id}" onclick="switchTab('${id}','B')">日志</button>
+    </div>
+    <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0">${layersDetail(d)}</div>
+    <div id="tabB_${id}_body" style="display:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
+  </td>`;
+  await loadLogTab(id);
+}
+window.switchTab = (id, tab) => {
+  ["A", "B"].forEach(t => {
+    const b = $("tab" + t + "_" + id + "_body");
+    const btn = $("tab" + t + "_" + id);
+    if (b) b.style.display = (t === tab) ? "" : "none";
+    if (btn) btn.className = (t === tab) ? "sm" : "sm gray";
+  });
+  if (tab === "B") loadLogTab(id);
+};
+window.toggleDetail = async (id, opts) => {
+  const tr = $("detail_" + id);
+  if (!tr) return;
+  if (tr.style.display !== "none") {
+    // t78 UI 反馈：折叠不自动收回（轮询/刷新保持），由用户手动关
+    tr.style.display = "none";
+    expandedDevs.delete(id);
+    if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
+    return;
+  }
+  expandedDevs.add(id);
+  await fillDetail(id);
   tr.style.display = "";
+  if (opts && opts.tab === "B") switchTab(id, "B");
+  if (!logIntervals[id]) logIntervals[id] = setInterval(() => { if (expandedDevs.has(id)) loadLogTab(id); }, 3000);
 };
-window.viewLog = id => {
-  logDevice = id; $("logWho").textContent = "· " + id;
-  if (logTimer) clearInterval(logTimer);
-  const load = async () => {
-    try {
-      const j = await api("/api/admin/device/" + id);
-      $("logbox").innerHTML = j.logs.map(l =>
-        `<div>[${new Date(l.ts*1000).toLocaleTimeString()}] <b>${l.step}</b> ${l.state} — ${esc(l.detail)}</div>`).join("")
-        || "（暂无日志）";
-      $("logbox").scrollTop = $("logbox").scrollHeight;
-    } catch (e) {}
-  };
-  load(); logTimer = setInterval(load, 3000);
-};
+window.viewLog = id => { toggleDetail(id, { tab: "B" }); };   // 日志并入折叠的「日志」tab
 
 // ---------- 进度条 ----------
 function barHtml(text, pct, cls=null) {
@@ -685,7 +773,7 @@ async function send() {
       headers: { "Content-Type": "application/json",
                  "Authorization": "Bearer " + (d.deploy.model_api_key || "") },
       body: JSON.stringify({
-        model: d.deploy.model,
+        model: d.deploy.model || (d.deploy.type === "h3" ? "sd" : ""),
         messages: [{ role: "user", content: text }],
         stream: true,
         stream_options: { include_usage: true },   // 让 vllm/sglang/ollama 在末块带 usage；strata 同协议
@@ -752,7 +840,13 @@ async function send() {
   }
 }
 $("btnSend").onclick = send;
+$("btnOcr").onclick = ocrSend;
 $("chatIn").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+$("ocrUrl").addEventListener("keydown", e => { if (e.key === "Enter") ocrSend(); });
+$("chatDev").addEventListener("change", () => {
+  const d = devices.find(x => x.device_id === $("chatDev").value);
+  updateChatMode(d);
+});
 
 // ---------- 变速刷新：部署中 2s，平时 5s，页面隐藏时暂停 ----------
 let refreshTimer = null;

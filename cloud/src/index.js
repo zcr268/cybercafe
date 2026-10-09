@@ -550,7 +550,8 @@ async function handleAdminDevices(env, url) {
     }
     devices.push(rec);
   }
-  devices.sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
+  // t78 UI 反馈：稳定键排序（hostname→device_id），心跳 last_seen 变化不再引起行顺序跳动
+  devices.sort((a, b) => (a.hostname || a.device_id || "").localeCompare(b.hostname || b.device_id || ""));
   return json({ ok: true, devices, models: MODELS, engines: ENGINES, retired_hidden: retiredHidden });
 }
 

@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.3"
+VERSION = "0.6.4"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -534,6 +534,10 @@ def heartbeat(extra=None):
                           "last_seen": int(time.time()), "usage": collect_usage(),
                           "layers": collect_layers(),
                           "components": components}}
+    # t78 唯一部署模型：组件部署的 deploy 状态随心跳上报（H3 running/installed、
+    # OCR installed 常驻），deploy.state 与 components.* 一致；引擎 deploy 仍走 L3 上报
+    if _component_deploy:
+        payload["device"]["deploy"] = dict(_component_deploy)
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -550,6 +554,7 @@ def report_progress(step, state, detail=""):
 
 def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
     payload = {"deploy": {"state": "online" if ok else "failed",
+                          "type": "engine",   # t78 唯一部署槽：类型权威字段
                           "engine": engine, "model": model,
                           "tunnel_url": tunnel_url,
                           "model_api_key": api_key, "ts": int(time.time())}}
@@ -847,6 +852,10 @@ def run_ocr(action):
         except Exception:
             ver = None
         _atomic_write(_ocr_marker, _json.dumps({"state": "installed", "version": ver, "ts": int(time.time())}))
+        # t78：OCR 常驻 8820，建机器隧道暴露 /ocr（页面可直接使用）并写唯一部署状态
+        url = _start_component_tunnel(8820)
+        _set_component_deploy({"type": "ocr", "state": "installed", "version": ver,
+                               "tunnel_url": url, "ts": int(time.time())})
         report_progress("ocr", "ok", "OCR 安装完成（" + str(ver) + "）")
         return 0
     if action == "uninstall":
@@ -863,6 +872,8 @@ def run_ocr(action):
                 tail = out[-100:]
             raise RuntimeError("OCR 卸载失败: " + tail)
         _atomic_write(_ocr_marker, _json.dumps({"state": "uninstalled", "ts": int(time.time())}))
+        _clear_component_deploy()   # t78：卸载后唯一部署槽回「无」
+        _stop_tunnel()
         report_progress("ocr", "ok", "OCR 已卸载")
         return 0
     raise RuntimeError("未知 OCR action: %s" % action)
@@ -920,6 +931,11 @@ def run_h3(action):
         if not st:
             st = {"state": "installed", "ts": int(time.time())}
             _atomic_write(_h3_marker, _json.dumps(st))
+        # t78：H3 安装后若已在运行 → 建机器隧道（11435 OpenAI 兼容）暴露
+        url = _start_component_tunnel(11435) if st.get("state") == "running" else None
+        _set_component_deploy({"type": "h3", "state": st.get("state", "installed"),
+                               "version": st.get("version"), "tunnel_url": url,
+                               "ts": int(time.time())})
         report_progress("h3", "ok", "H3 安装完成（" + str(st.get("state", "?")) + "）")
         return 0
     if action == "uninstall":
@@ -937,6 +953,8 @@ def run_h3(action):
                 tail = out[-100:]
             raise RuntimeError("H3 卸载失败: " + tail)
         # uninstall.sh 已 rm -rf H3_ROOT（含 .version）→ 状态回到未安装
+        _clear_component_deploy()
+        _stop_tunnel()
         report_progress("h3", "ok", "H3 已卸载")
         return 0
     if action in ("start", "stop", "status"):
@@ -945,9 +963,84 @@ def run_h3(action):
         rc, out = run("bash " + src_dir + "/install.sh " + action, timeout=300)
         if rc != 0:
             raise RuntimeError("H3 %s 失败: %s" % (action, out[-300:]))
+        st = _h3_state() or {}
+        if action == "start":
+            # t78：H3 启动后建机器隧道（11435 OpenAI 兼容 /v1/models，可直接聊天）
+            url = _start_component_tunnel(11435)
+            _set_component_deploy({"type": "h3", "state": "running",
+                                   "version": st.get("version"), "tunnel_url": url,
+                                   "ts": int(time.time())})
+        elif action == "stop":
+            _stop_tunnel()
+            _set_component_deploy({"type": "h3", "state": "installed",
+                                   "version": st.get("version"), "tunnel_url": "",
+                                   "ts": int(time.time())})
         report_progress("h3", "ok", "H3 %s 完成" % action)
         return 0
     raise RuntimeError("未知 H3 action: %s" % action)
+
+_component_deploy = None   # 组件唯一部署状态 {type,state,version,tunnel_url,ts}（t78 唯一部署模型）
+
+def _set_component_deploy(dep):
+    global _component_deploy
+    _component_deploy = dep
+
+def _clear_component_deploy():
+    global _component_deploy
+    _component_deploy = None
+
+def _stop_engine_containers():
+    """互斥：停引擎容器 + 网关/隧道（L3 cmd_stop 同款清单，best-effort）"""
+    run("docker rm -f ollama vllm-openai sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
+
+def _stop_ocr_server():
+    """互斥：停 OCR 服务（ocr.pid 优先，pkill 兜底）"""
+    run("if [ -f /opt/cybercafe-ocr/ocr.pid ]; then kill -9 $(cat /opt/cybercafe-ocr/ocr.pid) 2>/dev/null || true; fi; pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
+
+def _stop_h3_process():
+    """互斥：停 H3 进程（install.sh stop 子命令，脚本未拉取则跳过）"""
+    if os.path.exists(_H3_SRC_DIR + "/install.sh"):
+        run("bash " + _H3_SRC_DIR + "/install.sh stop >/dev/null 2>&1 || true", timeout=120)
+
+def _stop_tunnel():
+    run("pkill -9 -f 'cloudflared tunnel' 2>/dev/null || true", timeout=30)
+
+def _stop_other_deployments(target):
+    """唯一部署互斥：下发 target 前停掉该机其它部署（引擎容器/OCR 服务/H3 进程/隧道）。
+    一台机器同时最多一个部署；引擎↔OCR↔H3 可来回切换（t78）。"""
+    if target != "engine":
+        _stop_engine_containers()
+    if target != "ocr":
+        _stop_ocr_server()
+    if target != "h3":
+        _stop_h3_process()
+    if target != "engine":
+        _stop_tunnel()
+    log("互斥清理完成（target=%s，其余部署已停）" % target)
+
+def _start_component_tunnel(port):
+    """组件部署建机器隧道（trycloudflare）暴露组件 API（H3=11435 / OCR=8820）；
+    限时等待 URL（40s 硬上限），取不到如实返回 None（部署状态照常写入，UI 显示无隧道）。"""
+    _stop_tunnel()
+    run("cloudflared tunnel --no-autoupdate --url http://127.0.0.1:%d >> /tmp/cc-tunnel.log 2>&1 &" % port, timeout=10)
+    deadline = time.time() + 40
+    url = None
+    while time.time() < deadline:
+        try:
+            with open("/tmp/cc-tunnel.log") as f:
+                for line in f:
+                    i = line.find("https://")
+                    if i >= 0 and "trycloudflare.com" in line[i:]:
+                        url = line[i:].strip().split()[0]
+                        break
+        except Exception:
+            pass
+        if url:
+            break
+        time.sleep(2)
+    if not url:
+        log("组件隧道启动超时（40s 未取到 trycloudflare URL）")
+    return url
 
 def handle_command(cmd):
     ctype = cmd.get("type")
@@ -955,6 +1048,8 @@ def handle_command(cmd):
     try:
         if ctype in ("deploy", "stop", "restart_tunnel"):
             if ctype == "deploy":
+                _stop_other_deployments("engine")   # t78 唯一部署互斥：引擎下发前停 OCR/H3
+                _clear_component_deploy()            # t78：引擎接管唯一部署槽，停止心跳重发旧组件块
                 report_progress("command", "running", "下发最新 L3 并部署 %s %s" % (cmd.get("engine"), cmd.get("model")))
             else:
                 report_progress("command", "running", "下发最新 L3 执行 %s" % ctype)
@@ -965,8 +1060,14 @@ def handle_command(cmd):
                 report_deploy_result(False, model=cmd.get("model", ""))
             else:
                 log("L3 执行完成（rc=0，结果由 L3 上报）")
+                # t78：引擎接管唯一部署槽——重写 deploy.type=engine（merge 会保留 L3 的
+                # engine/model/tunnel_url，但清掉残留组件 type/version 字段）
+                heartbeat({"deploy": {"type": "engine", "state": "online",
+                                      "ts": int(time.time())}})
         elif ctype == "ocr":
             action = cmd.get("action", "install")
+            if action == "install":
+                _stop_other_deployments("ocr")      # t78 唯一部署互斥：OCR 安装前停引擎/H3
             report_progress("ocr", "running", "OCR 指令: %s" % action)
             rc = run_ocr(action)
             if rc != 0:
@@ -977,6 +1078,8 @@ def handle_command(cmd):
             action = cmd.get("action", "install")
             if action not in _H3_ACTIONS:
                 raise RuntimeError("未知 H3 action: %s" % action)
+            if action in ("install", "start"):
+                _stop_other_deployments("h3")       # t78 唯一部署互斥：H3 安装/启动前停引擎/OCR
             report_progress("h3", "running", "H3 指令: %s" % action)
             rc = run_h3(action)
             if rc != 0:
