@@ -266,3 +266,50 @@ main = 本轮新 HEAD（含 release-2026-10 全量 + L1/L2 + 驱动徽标 + OCR/
 
 ## 部署前对账（main 最终形态）
 main = 本轮新 HEAD（含 release 全量 + L1/L2 + 驱动徽标 + OCR/H3 页面选项 + 唯一部署模型/组件隧道/聊天窗双模式 + UI 反馈）。部署动作由队长复核后执行；未 sync aliyun / 未重建生产容器 / 未重启机器。
+
+---
+
+# 第七轮（t100，2026-10-09）：GitHub main 正规合流——生产部署链（0.6.8）入 main，消除仓库分裂
+
+## 背景
+生产部署链（aliyun main @ 5f48fd6，VERSION 0.6.8，含 t88/t89/t90/t93/t91/t92/t94/t95/t96/t97 等全部已验证改动）
+领先于 GitHub origin/main（94c9b45，0.6.5）——历史维护方式为「cherry-pick → ssh 直推 aliyun」，aliyun→github 出口不稳导致双轨。
+本次规范合流治本：生产已验证内容正式合入 origin/main，此后 main 为唯一正轨。
+
+## 拓扑与差异清单（新/旧 HEAD）
+- 旧 HEAD（GitHub origin/main）：94c9b45（t80 功能上线轮，0.6.5）
+- 生产链 HEAD（aliyun main）：5f48fd6（VERSION 0.6.8）
+- **生产链为 94c9b45 的线性后代**（`git merge-base --is-ancestor 94c9b45 <prod>` 通过）——无分叉，规范化合流 = **fast-forward**（零冲突）
+
+## 合入提交清单（94c9b45..5f48fd6，13 笔，逐一进入 main）
+| 提交 | 内容 |
+|---|---|
+| afac564 | fix(t88)：entrypoint 补注入 AGENT_LOCAL_ROOT_BASE（根通道本地化，OCR CORS 生产根因） |
+| 3c8f747 | fix(t93/t91/t92)：组件隧道改 docker cloudflared（真机可用）+ 互斥容器名对齐 L3（vllm）+ 停服 systemctl 优先 |
+| 203d26b | chore：VERSION 0.6.5→0.6.6（升级通道传播） |
+| 7362610 | feat(t89)：聊天窗补 H3 文生视频形态（/sdcpp/v1/vid_gen）按部署类型动态切形态 |
+| 831bfb2 | fix(t90)：详情/日志 tab 轮询重渲染跳回——tabState 记忆保持所选 tab |
+| 3edffac | fix(t95)：日志 tab 3s 轮询局部更新（内容对比零写入 + 滚动跟随） |
+| 5b6f9b2 | feat(t96)：全页局部刷新——设备行单元格级键控调和（不做整表重绘） |
+| 2d0e074 | feat(t94-part1)：三列级联数据映射（类型→引擎→模型/档位）index.js 目录 + API 暴露 catalog |
+| f1ec12d | feat(t97-part1)：磁盘滚动回收（agent 侧）部署前自动检查 + LRU 回收 + 手动命令 + 如实上报 |
+| a443ee1 | chore：VERSION 0.6.6→0.6.7（t97 需经升级通道传播） |
+| 786045a | feat(t94)：设备行三列级联下拉（任务类型→引擎→模型/档位）数据层渲染接上 |
+| 75b7d91 | feat(t97-part2)：磁盘回收手动入口——云端放行 recycle + 页面『回收磁盘』按钮 + agent LRU 同级序 |
+| 5f48fd6 | chore：VERSION 0.6.7→0.6.8（t97-part2 需经升级通道传播） |
+
+## 冲突处理
+**零冲突**（生产链为 main 的线性后代 → fast-forward；无需要人工解决的冲突、无 -X 蒙混）。deploy-* 中间分支（deploy-t95 等散落在 aliyun）的提交已全部涵盖于上述 13 笔线性链，无需另行处理。
+
+## 合流后验证（关键内容 grep 命中）
+| 内容 | 命中 |
+|---|---|
+| 三列级联 catalog | index.js DEPLOY_CATALOG（L565 API 暴露）+ index.html ×9 |
+| 磁盘回收 recycle | agent.py t97 全链（部署前保障/`_lru_recycle`/手动 recycle 命令 L1080-1213）+ index.html『回收磁盘』按钮 + index.js recycle 路由 |
+| 局部刷新（t96 键控调和） | index.html L503 键控调和实现（单元格指纹对比/顺序调和）+ index.js |
+| VERSION 0.6.8 | agent/cybercafe-agent.py `VERSION = "0.6.8"` |
+| 完整性与冲突标记 | git log 94c9b45..HEAD=13 笔；冲突标记 0 |
+| 语法门（生产链自验已过，合流环比） | node --check / py_compile / bash -n 全过 |
+
+## 纪律
+未 sync aliyun（它已领先且即线上）、未重建生产容器（已在线上运行 0.6.8）、未重启机器；未推新行为变更（仅同步已生产验证内容）；合流后 origin/main = 本轮 HEAD（= 生产链全部 13 笔 + 本报告提交），后续开发以 main 为唯一正轨。
