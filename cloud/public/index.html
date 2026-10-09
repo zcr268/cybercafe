@@ -165,6 +165,7 @@ let devices = [], engines = {}, logDevice = null, logTimer = null;
 // t78 UI 反馈：折叠展开态集合（跨轮询/刷新保持）+ 每设备日志 tab 轮询
 const expandedDevs = new Set();
 const logIntervals = {};
+const tabState = {};   // t90：每台设备当前选中的 tab（'A'=详情 | 'B'=日志），重渲染/轮询保持
 
 function toast(msg, ok=true) {
   const t = $("toast"); t.textContent = msg;
@@ -722,17 +723,20 @@ async function fillDetail(id) {
   await ensureScripts();   // 一致性比对需 /api/admin/scripts（best-effort，失败 → '—'，不报错）
   const d = devices.find(x => x.device_id === id) || {};
   // t78 UI 反馈：详情折叠用深色面板配色（#0f172a 同页头脚本面板）；内含 详情|日志 两个 tab
+  const curTab = tabState[id] || "A";   // t90：按记忆应用 tab（默认详情），轮询重渲染不跳回
   tr.innerHTML = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
     <div class="row" style="margin-bottom:6px">
       <button class="sm" id="tabA_${id}" onclick="switchTab('${id}','A')">详情</button>
       <button class="sm gray" id="tabB_${id}" onclick="switchTab('${id}','B')">日志</button>
     </div>
-    <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0">${layersDetail(d)}</div>
-    <div id="tabB_${id}_body" style="display:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
+    <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0;display:${curTab === "A" ? "" : "none"}">${layersDetail(d)}</div>
+    <div id="tabB_${id}_body" style="display:${curTab === "B" ? "" : "none"};font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
   </td>`;
+  if (curTab === "B") { $("tabA_" + id).className = "sm gray"; $("tabB_" + id).className = "sm"; }
   await loadLogTab(id);
 }
 window.switchTab = (id, tab) => {
+  tabState[id] = tab;   // t90：记录用户所选 tab，重渲染后保持
   ["A", "B"].forEach(t => {
     const b = $("tab" + t + "_" + id + "_body");
     const btn = $("tab" + t + "_" + id);
@@ -748,6 +752,7 @@ window.toggleDetail = async (id, opts) => {
     // t78 UI 反馈：折叠不自动收回（轮询/刷新保持），由用户手动关
     tr.style.display = "none";
     expandedDevs.delete(id);
+    delete tabState[id];   // t90：关闭折叠时清理该设备 tab 记忆，避免残留
     if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
     return;
   }
