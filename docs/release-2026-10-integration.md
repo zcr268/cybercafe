@@ -227,3 +227,42 @@ release-2026-10 = 07ab597，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t4
 
 ## 部署前对账（main 最终形态）
 main = 本轮新 HEAD（含 release-2026-10 全量 + L1/L2 + 驱动徽标 + OCR/H3 页面选项）。部署动作由队长复核后执行；未 sync aliyun / 未重建生产容器 / 未重启机器。
+
+---
+
+# 第六轮（t80，2026-10-09）：唯一部署模型 + 组件页面可用合入 main（功能上线轮）
+
+## 背景
+将唯一部署模型与组件页面可用（t78 + t79 + 随行 UI 修复 t81/t82/t83）合入 main（本轮 main 推进属预期功能上线；部署动作由队长复核后单独执行）。
+
+## 合入记录
+- 基座：origin/main = bebeaec（t73 第五轮收口态）
+- ① merge origin/t78-unique-deploy @ 524dddb（t78 唯一部署核心 + t81 配色 + t82 折叠双 tab + t83 列表稳定）——**ort 干净合并 0 冲突**（含 index.html layersDetail 区：ort 自动合并，t76 注入件·不比对与 t78 改动分属不同区域）
+- ② merge origin/t79-fix @ 0562905（t85 F1/F2：ocr.py CORS + agent 0.6.5 失败槽位清理）——ort 干净合并 0 冲突
+- 新 HEAD：见下（t80 合并提交 + 文档提交）
+
+## 冲突解法
+**零冲突**（两次 ort 干净合并；队长预警的 t76 注入件保护已核实保留：index.html L600-602「方案 2：不参与 sha 一致性比对，标注『注入件·不比对』」在位，未被 t78 覆盖；无 -X 蒙混）。**版本以 t79-fix 的 0.6.5 为准**（t78 0.6.4 → 合流后 0.6.5）。
+
+## 功能自证（逐一 grep 命中）
+| 功能 | 命中 |
+|---|---|
+| 唯一部署槽（单一「当前部署」槽） | index.html ×5 |
+| 唯一部署互斥（_stop_other_deployments 引擎/OCR/H3/隧道互停） | agent.py ×4 |
+| 组件隧道（_start_component_tunnel，H3=11435 / OCR=8820 trycloudflare URL 写 deploy） | agent.py ×4 |
+| 聊天窗模式（引擎/H3=文本、OCR=图片输入回显，#ocrIn） | index.html ×2 |
+| layers / gpu_driver / OCR 白名单 ×3 / H3 白名单 ×2（分层+驱动+组件白名单不回归） | agent 10/7 + index.js 3/2 |
+
+## 验证结果（本轮全绿）
+| 项 | 结果 |
+|---|---|
+| 祖先链：bebeaec + c944e11(t78) + 524dddb(t81) + 0562905(t79-fix) | ANCESTRY-OK |
+| 冲突标记 / 无 -X 蒙混 | 0 |
+| 语法门：node --check / py_compile agent+deploy+ocr / bash -n 全部 .sh | SYNTAX-OK |
+| H3 双份逐字节一致 + sha256 前8 a10fc203 | H3-COPIES-IDENTICAL |
+| REGISTRY_MIRRORS daocloud-only + 探测未动；无 docker.1ms.run | MIRROR-OK |
+| 测试残留 | 0 |
+| 依赖验证：t79 沙箱（状态机/互斥/CORS 协议级/隧道存活）+ t84（配色/双 tab/列表稳定/无回归） | PASS |
+
+## 部署前对账（main 最终形态）
+main = 本轮新 HEAD（含 release 全量 + L1/L2 + 驱动徽标 + OCR/H3 页面选项 + 唯一部署模型/组件隧道/聊天窗双模式 + UI 反馈）。部署动作由队长复核后执行；未 sync aliyun / 未重建生产容器 / 未重启机器。
