@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -524,10 +524,16 @@ def collect_layers(force=False):
 
 def heartbeat(extra=None):
     ocr = _ocr_state()
+    h3 = _h3_state()
+    components = {}
+    if ocr:
+        components["ocr"] = ocr
+    if h3:
+        components["h3"] = h3
     payload = {"device": {"device_id": device_id(), "agent_version": VERSION,
                           "last_seen": int(time.time()), "usage": collect_usage(),
                           "layers": collect_layers(),
-                          "components": {"ocr": ocr} if ocr else {}}}
+                          "components": components}}
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -861,6 +867,88 @@ def run_ocr(action):
         return 0
     raise RuntimeError("未知 OCR action: %s" % action)
 
+# ---------------------------------------------------------------- H3 组件（t74）
+
+_h3_marker = "/opt/minimax-h3/.version"
+_H3_DIR = "/opt/minimax-h3"           # 安装目标（权重/编译产物/日志；模块级常量便于沙箱覆盖）
+_H3_SRC_DIR = "/opt/cybercafe-h3-src" # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
+_H3_ACTIONS = ("install", "uninstall", "start", "stop", "status")
+
+def _h3_state():
+    """components.h3：读本机 H3 安装状态标记（install.sh 子命令/主流程写 .version）。"""
+    try:
+        with open(_h3_marker) as f:
+            st = json.loads(f.read())
+        return st if isinstance(st, dict) and st.get("state") else None
+    except Exception:
+        return None
+
+def _fetch_h3(script_name, out_path, mode=0o755):
+    src = _fetch_extra(script_name)
+    if not src or len(src) < 64:
+        raise RuntimeError("H3 脚本 %s 拉取失败/长度异常（%d 字节）" % (script_name, len(src or "")))
+    if not (src.startswith("#!") or "#!/" in src[:2]):
+        raise RuntimeError("H3 脚本 %s 校验失败（缺 shebang）" % script_name)
+    _atomic_write(out_path, src, mode)
+    return src
+
+def run_h3(action):
+    """H3 安装/卸载/启停：云端拉取 minimax-h3 脚本 → 校验 → 执行 → .version 状态回传。
+    install/uninstall 走主流程；start/stop/status 走 install.sh 子命令。
+    与 L3/OCR 同纪律：拉不到/校验不过/执行失败 → 如实 fail，绝不静默成功。"""
+    import json as _json
+    h3_dir = _H3_DIR
+    src_dir = _H3_SRC_DIR                  # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
+    os.makedirs(src_dir, exist_ok=True)
+    if action == "install":
+        _fetch_h3("minimax-h3/install.sh", src_dir + "/install.sh")
+        st = {"state": "installing", "ts": int(time.time())}
+        _atomic_write(_h3_marker, _json.dumps(st))
+        report_progress("h3", "running", "H3 安装执行中（编译 sd.cpp + 拉 ~27GB 权重 + 冒烟，约 10-20 分钟）")
+        # stdout/stderr 重定向日志文件：install.sh 后台启动的 sd-server 会继承管道 fd，
+        # 用 PIPE 捕获会因服务存活导致 run() 挂到超时（与 OCR 同陷阱，t71 已修）
+        logp = h3_dir + "/h3-install.log"
+        os.makedirs(h3_dir, exist_ok=True)
+        rc, out = run("bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=1800)
+        if rc != 0:
+            try:
+                tail = open(logp).read()[-300:]
+            except Exception:
+                tail = out[-100:]
+            raise RuntimeError("H3 安装失败: " + tail)
+        st = _h3_state()   # install.sh 已写 .version（state=running/installed）
+        if not st:
+            st = {"state": "installed", "ts": int(time.time())}
+            _atomic_write(_h3_marker, _json.dumps(st))
+        report_progress("h3", "ok", "H3 安装完成（" + str(st.get("state", "?")) + "）")
+        return 0
+    if action == "uninstall":
+        _fetch_h3("minimax-h3/uninstall.sh", src_dir + "/uninstall.sh")
+        st = {"state": "uninstalling", "ts": int(time.time())}
+        _atomic_write(_h3_marker, _json.dumps(st))
+        report_progress("h3", "running", "H3 卸载执行中")
+        logp = h3_dir + "/h3-uninstall.log"
+        os.makedirs(h3_dir, exist_ok=True)
+        rc, out = run("bash " + src_dir + "/uninstall.sh > " + logp + " 2>&1", timeout=600)
+        if rc != 0:
+            try:
+                tail = open(logp).read()[-300:]
+            except Exception:
+                tail = out[-100:]
+            raise RuntimeError("H3 卸载失败: " + tail)
+        # uninstall.sh 已 rm -rf H3_ROOT（含 .version）→ 状态回到未安装
+        report_progress("h3", "ok", "H3 已卸载")
+        return 0
+    if action in ("start", "stop", "status"):
+        _fetch_h3("minimax-h3/install.sh", src_dir + "/install.sh")
+        report_progress("h3", "running", "H3 %s 执行中" % action)
+        rc, out = run("bash " + src_dir + "/install.sh " + action, timeout=300)
+        if rc != 0:
+            raise RuntimeError("H3 %s 失败: %s" % (action, out[-300:]))
+        report_progress("h3", "ok", "H3 %s 完成" % action)
+        return 0
+    raise RuntimeError("未知 H3 action: %s" % action)
+
 def handle_command(cmd):
     ctype = cmd.get("type")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
@@ -885,6 +973,16 @@ def handle_command(cmd):
                 report_progress("ocr", "fail", "OCR %s 失败（rc=%d）" % (action, rc))
             else:
                 log("OCR %s 完成" % action)
+        elif ctype == "h3":
+            action = cmd.get("action", "install")
+            if action not in _H3_ACTIONS:
+                raise RuntimeError("未知 H3 action: %s" % action)
+            report_progress("h3", "running", "H3 指令: %s" % action)
+            rc = run_h3(action)
+            if rc != 0:
+                report_progress("h3", "fail", "H3 %s 失败（rc=%d）" % (action, rc))
+            else:
+                log("H3 %s 完成" % action)
         else:
             log("未知指令类型: %s" % ctype)
     except Exception as e:

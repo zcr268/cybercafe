@@ -662,10 +662,12 @@ async function handleAdminDeploy(request, env) {
 
 async function handleAdminCommand(request, env) {
   const body = await request.json().catch(() => ({}));
-  if (!body.device_id || !["stop", "restart_tunnel", "ocr"].includes(body.type))
-    return json({ error: "device_id + type(stop|restart_tunnel|ocr) required" }, 400);
+  if (!body.device_id || !["stop", "restart_tunnel", "ocr", "h3"].includes(body.type))
+    return json({ error: "device_id + type(stop|restart_tunnel|ocr|h3) required" }, 400);
   if (body.type === "ocr" && !["install", "uninstall"].includes(body.action))
     return json({ error: "ocr action(install|uninstall) required" }, 400);
+  if (body.type === "h3" && !["install", "uninstall", "start", "stop"].includes(body.action))
+    return json({ error: "h3 action(install|uninstall|start|stop) required" }, 400);
   const exists = await env.CYBERCAFE_KV.get(`device:${body.device_id}`, "json");
   if (!exists) return json({ error: "device not found" }, 404);
   await env.CYBERCAFE_KV.put(`cmd:${body.device_id}`,
@@ -712,6 +714,8 @@ const INSTALL_EXTRA_ALLOW = {
   "ocr/install.sh": "root",     // t71：OCR 组件经 extra 通道下发（root 作用域 + ocr/ 子路径）
   "ocr/uninstall.sh": "root",
   "ocr/ocr.py": "root",
+  "minimax-h3/install.sh": "root",   // t74：H3 组件经 extra 通道下发（root 作用域 + minimax-h3/ 子路径）
+  "minimax-h3/uninstall.sh": "root",
 };
 
 async function handleInstallSh(request, env, url) {

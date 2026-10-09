@@ -36,6 +36,9 @@
 #        H3_QUANT=Q5_0 bash install.sh     # 可选更高档（13.0GB denoiser）
 #        H3_QUANT=UD-Q3_K_XL bash install.sh # 可选（8.9GB，质量/速度均衡）
 #        H3_SERVER=0 bash install.sh # 只装模型+CLI 验证，不常驻 HTTP 服务
+#        bash install.sh status     # 状态（读 .version；未安装→uninstalled）
+#        bash install.sh start      # 启动 sd-server（需已安装；写 .version state=running）
+#        bash install.sh stop       # 停止 sd-server（写 .version state=installed）
 # 卸载:  bash uninstall.sh
 # =============================================================================
 set -euo pipefail
@@ -52,10 +55,70 @@ SDCPP_DIR="$H3_ROOT/sd.cpp"
 MODELS_DIR="$H3_ROOT/models"
 LOG="$H3_ROOT/install.log"
 GCC_ISO="/root/.cybercafe-gcc12"               # 与 strata 相同的 gcc-12 隔离目录（避免污染系统 gcc）
+H3_VERSION_FILE="$H3_ROOT/.version"            # 组件状态标记（t74：agent 心跳 components.h3 读它）
+# CUDA toolkit 探测前置（子命令 start 与主流程共用；nvcc 不在 PATH 时注入）
+CUDA_ENV=""
+if [ -x /usr/local/cuda/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}";
+elif [ -x /usr/local/cuda-12.2/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda-12.2/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:${LD_LIBRARY_PATH:-}";
+fi
 
 say()  { printf '\033[1;34m[h3]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[h3 ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# ------------------------- 子命令（t74：页面安装/卸载后的启停与状态查询） -------------------------
+# 状态四态由 agent 读 .version 动态计算；这里提供 status/start/stop 三个子命令供页面操作。
+H3_CMD="${1:-}"
+H3_VERSION="0.1.0"    # 组件版本（t74：写 .version 上报页面）
+
+h3_write_version() {  # h3_write_version <state>
+  printf '{"state":"%s","version":"%s","quant":"%s","ts":%s}\n' \
+         "$1" "$H3_VERSION" "${H3_QUANT}" "$(date +%s)" > "$H3_VERSION_FILE"
+}
+
+if [ "$H3_CMD" = "status" ]; then
+  if [ -f "$H3_VERSION_FILE" ]; then cat "$H3_VERSION_FILE"; else echo '{"state":"uninstalled"}'; fi
+  exit 0
+fi
+if [ "$H3_CMD" = "start" ]; then
+  [ -x "$SDCPP_DIR/build/bin/sd-server" ] || die "sd-server 不存在（先安装）"
+  pkill -f "sd-server.*$H3_PORT" 2>/dev/null || true
+  # 与安装主流程第 5 步一致的启动参数（te=cpu / denoiser+VAE cuda0 / offload 流式）
+  # 权重文件名 = dl() 的档位编码名（见下载 case）
+  case "$H3_QUANT" in
+    UD-Q2_K_XL) DIFF_NAME="minimax_h3_fl2va_pruned-UD-Q2_K_XL.gguf" ;;
+    UD-Q3_K_XL) DIFF_NAME="minimax_h3_fl2va_pruned-UD-Q3_K_XL.gguf" ;;
+    Q4_K_M)     DIFF_NAME="minimax_h3_fl2va_pruned-Q4_K.gguf" ;;
+    Q5_0)       DIFF_NAME="minimax_h3_fl2va_pruned-Q5_0.gguf" ;;
+    *) die "未知 H3_QUANT=$H3_QUANT" ;;
+  esac
+  env $CUDA_ENV nohup "$SDCPP_DIR/build/bin/sd-server" \
+    --diffusion-model "$MODELS_DIR/$DIFF_NAME" \
+    --vae "$MODELS_DIR/minimax_h3_video_vae_fp16.safetensors" \
+    --audio-vae "$MODELS_DIR/minimax_h3_audio_vae_fp32.safetensors" \
+    --llm "$MODELS_DIR/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" \
+    --backend "te=cpu,vae=cuda0,diffusion=cuda0" --offload-to-cpu \
+    --diffusion-fa --cfg-scale 1.0 \
+    --listen-ip 127.0.0.1 --listen-port "$H3_PORT" \
+    > "$H3_ROOT/sd-server.log" 2>&1 &
+  for _ in $(seq 1 30); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:$H3_PORT/v1/models" || true)
+    [ "$code" = 200 ] && break
+    sleep 2
+  done
+  [ "$code" = 200 ] || die "sd-server 启动未就绪（HTTP ${code:-000}），见 $H3_ROOT/sd-server.log"
+  h3_write_version "running"
+  echo "{\"state\":\"running\",\"version\":\"$H3_VERSION\"}"
+  exit 0
+fi
+if [ "$H3_CMD" = "stop" ]; then
+  [ -f "$H3_VERSION_FILE" ] || { echo '{"state":"uninstalled"}' >&2; exit 1; }
+  pkill -f "sd-server.*$H3_PORT" 2>/dev/null || true
+  sleep 1
+  h3_write_version "installed"
+  echo "{\"state\":\"installed\",\"version\":\"$H3_VERSION\"}"
+  exit 0
+fi
 
 mkdir -p "$H3_ROOT" "$MODELS_DIR"
 exec > >(tee -a "$LOG") 2>&1
@@ -85,10 +148,7 @@ fi
 
 # CUDA toolkit 预检 + nvcc/gcc 兼容（t23 教训：CUDA 12.x 只支持宿主 gcc<=12，
 # 目标机 Ubuntu 24.04 默认 gcc 13.3 → 需 gcc-12 隔离注入，否则 CMake enable_language(CUDA) 失败）
-CUDA_ENV=""
-if [ -x /usr/local/cuda/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}";
-elif [ -x /usr/local/cuda-12.2/bin/nvcc ]; then CUDA_ENV="PATH=/usr/local/cuda-12.2/bin:${PATH:-} LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:${LD_LIBRARY_PATH:-}";
-fi
+# （CUDA_ENV 已在配置区初始化，此处仅校验）
 [ -n "$CUDA_ENV" ] || die "未找到 CUDA toolkit（/usr/local/cuda*）——需先装 CUDA 12.x/13.x（sudo apt install nvidia-cuda-toolkit 或 developer.nvidia.com）"
 
 nvcc_v=$(env $CUDA_ENV nvcc --version | grep -oE 'release [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
@@ -248,6 +308,14 @@ say "=== 安装完成 ==="
 say "冒烟产物: $SMOKE_OUT"
 [ "$H3_SERVER" = 1 ] && say "HTTP:     http://127.0.0.1:$H3_PORT/v1/models"
 say "权重:     $MODELS_DIR  （uninstall.sh 一键全清）"
+# 组件状态标记（t74）：写 .version 供 agent 心跳 components.h3 读取；
+# state：H3_SERVER=1 且服务就绪→running，否则 installed（仅 CLI 验证）
+if [ "$H3_SERVER" = 1 ]; then
+  h3_write_version "running"
+else
+  h3_write_version "installed"
+fi
+say "组件状态已写: $H3_VERSION_FILE（state=$( [ "$H3_SERVER" = 1 ] && echo running || echo installed )）"
 # 卸载脚本落位：uninstall-all.sh 的 SUB_UNINSTALLS 固定引用 /opt/minimax-h3/uninstall.sh
 # （t28 约定），必须与 H3_ROOT 一致，否则统一卸载会漏掉本模型
 SCRIPT_SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
