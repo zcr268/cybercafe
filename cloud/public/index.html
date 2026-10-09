@@ -549,6 +549,24 @@ function chatLabel(d) {
   if (dep.type === "h3") return "H3 " + (dep.version || "");
   return (dep.engine || "") + " " + (dep.model || "");
 }
+// t98-EGO 复检抓回（二）：t96 重写 renderDevices 的 span 替换同时误删 chatLabel 与
+// updateChatMode（两者均位于 renderDevices→renderChatDevs 之间的原文件区段）。
+// chatLabel 已在 fix(regression) 6499188 恢复；此处恢复 updateChatMode（t89 三形态语义）。
+function updateChatMode(d) {
+  const dep = (d && d.deploy) || null;
+  const isOcr = !!(dep && dep.type === "ocr");
+  const isVid = !!(dep && dep.type === "h3");
+  $("ocrIn").style.display = isOcr ? "" : "none";
+  $("vidIn").style.display = isVid ? "" : "none";
+  $("chatIn").style.display = (isOcr || isVid) ? "none" : "";
+  $("btnSend").style.display = (isOcr || isVid) ? "none" : "";
+  const t = (dep && dep.tunnel_url) || "";
+  if (!d) { $("chatMeta").textContent = "无在线模型设备"; return; }
+  if (isOcr) { $("chatMeta").textContent = "OCR 图片识别 → 文字回显 · " + t; return; }
+  if (isVid) { $("chatMeta").textContent = "H3 文生视频（/sdcpp/v1/vid_gen）· " + t; return; }
+  if (dep && (dep.type === "engine" || dep.engine)) { $("chatMeta").textContent = "文本聊天 · " + t; return; }
+  $("chatMeta").textContent = "当前部署类型不可用（仅支持 文本/OCR 图片/H3 文生视频）· " + t;
+}
 function renderChatDevs() {
   // 聊天下拉：在线 + 有隧道 + 引擎/H3/OCR 当前部署之一（t78 唯一部署模型）
   const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url) &&
