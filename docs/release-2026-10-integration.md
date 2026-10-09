@@ -142,3 +142,43 @@ ocr/uninstall.sh（F2）不受本轮影响。无 -X 蒙混（内容即 F1-R2 最
 
 ## 部署前对账（最终形态）
 release-2026-10 = 6517213，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t49/t42(OCR)/t28-F1-R2 全量合一。
+
+---
+
+# 第四轮（t67，2026-10-09）：放行前预演修复 R2+R3 合流收口
+
+## 背景
+放行前预演（R 系列）发现两个真缺陷，均已修复并独立验证：
+- **R2（t63，efe4e12）**：gpu_toolkit 外部源 curl 无超时 → 新机部署静默挂起 ~6min；修复 = 显式双超时（`--connect-timeout 10 --max-time 30`）+ curl 与 gpg/sed 分开执行取自身 rc（消除管道 rc 被掩盖的静默成功陷阱）+ `NVIDIA_TOOLKIT_BASE` 备用源环境变量 + apt 限时 + 失败如实 DeployError。
+- **R3（t65，e26923b）**：SGLang 首部署网关自检与 nginx 启动时序竞争（瞬时 000 误判失败）；修复 = 网关自检 wall-clock 90s 硬上限有界退避（每 2s 一轮）。
+- **R1 用户决策 = c)**：本次不使用 ollama、不 pin 版本、不升级驱动——本轮不含任何 ollama 改动。
+
+## 合入记录
+- 基线：origin/release-2026-10 = 3f1eafc（t61 第三轮收口态）
+- 合入：origin/t63-gpu-timeout @ e26923b（含 efe4e12 R2 + e26923b R3）
+- 新 HEAD：`07ab597`（Merge remote-tracking branch 'origin/t63-gpu-timeout'，仅 agent/cybercafe-deploy.py 43+/17-）
+- 祖先六证：941c54b / 131511a / 2b190ea / 6c83ba0 / efe4e12 / e26923b 逐一 `is-ancestor` 通过
+
+## 冲突解法
+**零冲突**（ort 干净合并，队长预检确认；t63 分支基于 c384da2/t45、无 t51 镜像源修复，两侧改动位于不同函数区域——镜像源≈行 114-150 / R2 gpu_toolkit≈行 200-233 / R3 网关自检≈行 600+，并集合并无冲突）。无 -X 蒙混。
+
+## 三套改动并集自证（最终 HEAD `git show HEAD:agent/cybercafe-deploy.py`）
+1. **t51 镜像源修复（未被 R2 顶掉）**：`import threading`（L18）、`REGISTRY_MIRRORS = ["https://docker.m.daocloud.io"]`（L119）、`_probe_mirrors`（L189/219）✓
+2. **R2**：`CURL = "curl -fsSL --connect-timeout 10 --max-time 30"`（L241）、`base = os.environ.get("NVIDIA_TOOLKIT_BASE", ...)`（L242）✓
+3. **R3**：`total_cap = 90.0`（L642）+ 有界退避循环（L646）+ 超限如实 DeployError（L655）✓
+
+## 验证结果（本轮全绿）
+| 项 | 结果 |
+|---|---|
+| 祖先六证 | ANCESTRY-OK |
+| 冲突标记（git grep 全树） | 0 |
+| R2+R3 形态 grep | R2R3-FORM-OK |
+| 语法门：node --check / py_compile×2 / bash -n 全部 .sh | SYNTAX-OK |
+| H3 双份逐字节一致 + sha256 前16 `b2b8d725d2c0192f` | H3-COPIES-IDENTICAL |
+| REGISTRY_MIRRORS daocloud-only + 探测未动；无 docker.1ms.run 字面量 | MIRROR-OK |
+| index.js 四关切：hw_source=5 / INSTALL_EXTRA_ALLOW=2（5 项白名单完整）/ cybercafe-deploy.py=1 / RETIRE_AFTER_S=3 / fetchRepoFileRoot=4 | 完整保留 |
+| origin/main 未动 | 15a89d1 |
+| 依赖验证：t63 沙箱实测（源不可达 10.0s 如实 DeployError / 可达 3.0s / 已装 0.0s）+ t65 沙箱实测（延迟 5s→6.1s 成功 / 永不启动→93s 上限内如实 fail / 幂等 2.0s） | pass |
+
+## 部署前对账（最终放行形态）
+release-2026-10 = 07ab597，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t49/t42(OCR)/t28-F1-R2/t63-R2/t65-R3 全量合一；R1 决策 c) 已含（无 ollama 改动）。
