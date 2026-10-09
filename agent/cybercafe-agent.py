@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.6"
+VERSION = "0.6.8"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -996,11 +996,13 @@ def _stop_engine_containers():
     # L3 ENGINES 表为单一事实源（ENGINES = {ollama:{container:"ollama"}, vllm:{container:"vllm"},
     # sglang:{container:"sglang"}} + chatgw + cloudflared 隧道容器）。任何引擎容器名改动须同步
     # 此处并与 L3 对齐（t86 真机捕获：旧清单 'vllm-openai' 与实际 'vllm' 不一致致互斥失效）。
-    run("docker rm -f ollama vllm sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
+    # t98：互斥清单含 OCR 容器 cybercafe-ocr（docker 化后停 OCR 亦经此链）
+    run("docker rm -f ollama vllm sglang cloudflared chatgw cybercafe-ocr 2>/dev/null || true", timeout=60)
 
 def _stop_ocr_server():
-    """互斥：停 OCR 服务——真机为 systemd 单元（t92：systemctl stop 优先），pkill 兜底"""
-    run("systemctl stop cybercafe-ocr.service 2>/dev/null || true; "
+    """互斥：停 OCR——t98 容器形态 docker rm -f 优先（替代 systemctl/pkill），旧形态兜底"""
+    run("docker rm -f cybercafe-ocr 2>/dev/null || true; "
+        "systemctl stop cybercafe-ocr.service 2>/dev/null || true; "
         "if [ -f /opt/cybercafe-ocr/ocr.pid ]; then kill -9 $(cat /opt/cybercafe-ocr/ocr.pid) 2>/dev/null || true; fi; "
         "pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
 
@@ -1128,7 +1130,8 @@ def _lru_recycle(target_gb):
                 continue
             img = parts[2].strip()
             if not img or img in keep_img or not any(k in img for k in
-                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
+                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw",
+                     "cybercafe-ocr", "ghcr", "mirror")):
                 continue
             rows.append((parts[1].strip(), img))   # (CreatedAt, image)
         rows.sort(key=lambda r: r[0])              # 升序 → 最近最少使用（最旧）优先
