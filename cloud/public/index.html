@@ -703,10 +703,15 @@ async function loadLogTab(id) {
   if (!body) return;
   try {
     const j = await api("/api/admin/device/" + id);
-    body.innerHTML = (j.logs || []).map(l =>
+    const html = (j.logs || []).map(l =>
       `<div>[${new Date(l.ts*1000).toLocaleTimeString()}] <b>${esc(l.step)}</b> ${esc(l.state)} — ${esc(l.detail)}</div>`).join("")
-      || "（暂无日志）";
-    body.scrollTop = body.scrollHeight;
+      || `<div style="color:#64748b">（暂无日志）</div>`;
+    // t95：内容对比——新旧 HTML 相同则完全不写（零 DOM 写入，消除"日志在刷/在闪"观感）
+    if (html === body.innerHTML) return;
+    // 滚动跟随（follow-bottom）：用户上翻阅读时不被每次刷新拉回底部
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = html;
+    if (nearBottom) body.scrollTop = body.scrollHeight;
   } catch (e) {}
 }
 async function fillDetail(id) {
