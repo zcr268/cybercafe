@@ -1118,22 +1118,28 @@ def _lru_recycle(target_gb):
         freed_d = df_now()
         note("docker-cache", "image/builder prune")
         __delta()
-    # ② 旧引擎镜像（保留当前运行镜像）
+    # ② 旧引擎镜像（保留当前运行镜像；t97【LRU 序】同级按 CreatedAt 升序=最旧先清）
     if freed < target_gb:
-        rc, out = run("docker images --format {{.Repository}}:{{.Tag}}", timeout=30)
-        gone = 0
+        rc, out = run("docker images -a --format '{{.ID}}\t{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}'", timeout=30)
+        rows = []
         for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            img = parts[2].strip()
+            if not img or img in keep_img or not any(k in img for k in
+                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
+                continue
+            rows.append((parts[1].strip(), img))   # (CreatedAt, image)
+        rows.sort(key=lambda r: r[0])              # 升序 → 最近最少使用（最旧）优先
+        gone = 0
+        for _, img in rows:
             if freed >= target_gb:
                 break
-            img = line.strip()
-            if not img or img in keep_img:
-                continue
-            # 命中引擎/镜像前缀（含 mirror 组织名），只清非当前运行的
-            if any(k in img for k in ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
-                run("docker rmi -f %s >/dev/null 2>&1" % img, timeout=120)
-                gone += 1
-                freed = df_now()
-                note("old-image", img)
+            run("docker rmi -f %s >/dev/null 2>&1" % img, timeout=120)
+            gone += 1
+            freed = df_now()
+            note("old-image", img)
         __delta()
         if gone == 0:
             note("old-image", "无")

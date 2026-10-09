@@ -493,6 +493,7 @@ function buildRowCells(d) {
         <button class="sm gray" onclick="toggleDetail('${d.device_id}')">详情</button>
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
+        <button class="sm gray" onclick="recycleDisk('${d.device_id}')" title="手动磁盘滚动回收（LRU，绝不动当前运行部署）">回收磁盘</button>
         <br><span style="font-size:11px;color:#94a3b8">组件: OCR ${esc(ocrSt)} · H3 ${esc(h3St)}</span>
       </div>`,
     ];
@@ -565,7 +566,7 @@ function cascadeState(id) {
 }
 function cascadeOptionsHtml(st) {
   // ③ 模型/档位：text→引擎模型清单；ocr→固定安装项；h3→档位（h3-fast/h3-hd）
-  if (st.type === "ocr") return `<option>安装 OCR</option>`;
+  if (st.type === "ocr") return `<option>OCR（rapidocr 1.4.4）</option>`;   // t94 契约：OCR 固定项
   if (st.type === "h3") {
     const ops = (catalog && catalog.h3 && catalog.h3.options) || {};
     return Object.keys(ops).map(k => `<option value="${esc(k)}" ${k === (st.option || "h3-fast") ? "selected" : ""}>${esc(k)}（${esc(ops[k])}）</option>`).join("");
@@ -747,6 +748,12 @@ window.h3Cmd = async (id, action) => {
 window.cmd = async (id, type) => {
   try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type }) });
         toast("指令已下发: " + type); }
+  catch (e) { toast(e.message, false); }
+};
+window.recycleDisk = async id => {
+  // t97 手动触发：与自动同一 _lru_recycle 路径；回收事件进设备日志（视图刷新可见）
+  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "recycle" }) });
+        toast("磁盘回收指令已下发（清理旧镜像/缓存/旧权重，绝不动当前运行部署）"); viewLog(id); setTimeout(refresh, 1500); }
   catch (e) { toast(e.message, false); }
 };
 window.delDev = async id => {
