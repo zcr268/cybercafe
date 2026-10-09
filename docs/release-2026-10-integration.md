@@ -182,3 +182,48 @@ release-2026-10 = 6517213，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t4
 
 ## 部署前对账（最终放行形态）
 release-2026-10 = 07ab597，可部署批次：t33/t35/t37/t39/t41/t45/t48(H3)/t49/t42(OCR)/t28-F1-R2/t63-R2/t65-R3 全量合一；R1 决策 c) 已含（无 ollama 改动）。
+
+---
+
+# 第五轮（t73，2026-10-09）：功能上线轮——L1/L2 + 驱动版本 + 引擎徽标 + OCR/H3 页面选项合入 main
+
+## 背景
+本轮将四个页面功能上线合入 main（本轮 main 推进属预期功能上线；部署动作由队长复核后单独执行）：
+- t69（24de542）：每台机器 L1/L2 分层脚本状态展示到云管页面（layers 心跳字段 + 三态通道 + 详情/一致性比对）
+- t71（a13c794）：GPU 驱动版本采集 + Strata/ollama 引擎兼容徽标（动态比较）+ OCR 页面选项（一键装/卸）
+- t74（483871b+84a827e）：H3 页面选项（组件区四态 + 安装/卸载/启停经云端下发）+ scripts/ 双份同步
+- t76（5f8f7ca）：服务单元 sha 一致性对安装注入感知（注入件·不比对，消除真机恒 ⚠ 假警）
+
+## 合入记录
+- 基座：origin/main = d5a9ec8（release-2026-10 第四轮收口态，即放行批次全量）
+- ① merge origin/t69-l1l2 @ 5f8f7ca（t69+t71+t76）——**fast-forward 快进**（该分支本就基于 release 链，0 冲突）
+- ② merge origin/t74-h3-component @ 84a827e（t74 + scripts 同步）——ort 干净合并（0 冲突；index.html 的 H3 组件行与 layersDetail 服务单元行位于不同区域自动合并；minimax-h3/install.sh 与 scripts/install.sh 同步获得 76 行子命令增强后仍逐字节一致）
+- 新 HEAD：见下（合并提交 t73-merge）
+
+## 冲突解法
+**零冲突**（快进 + ort 干净合并；两分支共同基点为 a13c794，各自增量区域不同；无 -X 蒙混）。
+
+## 功能自证（逐一 grep 命中）
+| 功能 | 位置与命中 |
+|---|---|
+| layers 心跳字段 | agent/cybercafe-agent.py ×10 |
+| gpu_driver | agent/cybercafe-agent.py ×7 |
+| 引擎要求表 | cloud/public/index.html L416-417 `const REQ = { strata: { min: 580...}, ollama: { min: 550...}}`（t72 已确认「徽标阈值 UI 硬编码」为设计；index.js 无此表系 t45 L3 拆分引擎定义移出所致，等价修正 grep 自证通过，援引 t57 先例）；`min_driver`（deploy.py ENGINES）×3 |
+| ocr 路由与白名单 | index.js ×7（白名单 ocr/install.sh + ocr/uninstall.sh + ocr/ocr.py root 作用域） |
+| h3 路由与白名单 | index.js ×2、agent.py run_h3 ×2（白名单 minimax-h3/install.sh + minimax-h3/uninstall.sh root 作用域） |
+| components.ocr / components.h3 | agent.py 9/11 + index.js 2/2 |
+
+## 验证结果（本轮全绿）
+| 项 | 结果 |
+|---|---|
+| 祖先链：d5a9ec8 + t69(24de542) + t71(a13c794) + t74(483871b) + t76(5f8f7ca) | ANCESTRY-OK（逐一 is-ancestor） |
+| 冲突标记（git grep 全树）/ 测试残留 | 0 / 无（wrangler.toml 为合法配置误报） |
+| 白名单（扩展后 10 项：原 5 + ocr×3 + minimax-h3×2） | 完整 |
+| 语法门：node --check / py_compile ×2 / bash -n 全部 .sh | SYNTAX-OK |
+| H3 双份逐字节一致 + sha256 前8 `a10fc203`（t74 后新 sha，不再引用旧 b2b8d725d2c0192f） | H3-COPIES-IDENTICAL |
+| GPU 放置语义 + 真机修复标记（offload-to-cpu×5 / LD_LIBRARY_PATH×2 / CUDA_ENV#PATH×1 / --recursive×3 / cc1plus×5） | 保留 |
+| REGISTRY_MIRRORS daocloud-only + 探测未动；无 docker.1ms.run 字面量 | MIRROR-OK |
+| 依赖验证：t69 自验（三态通道/一致性翻转红线）、t72 沙箱端到端 8/8、t75 沙箱 8 项、t76 双向实证 | 全过 |
+
+## 部署前对账（main 最终形态）
+main = 本轮新 HEAD（含 release-2026-10 全量 + L1/L2 + 驱动徽标 + OCR/H3 页面选项）。部署动作由队长复核后执行；未 sync aliyun / 未重建生产容器 / 未重启机器。
