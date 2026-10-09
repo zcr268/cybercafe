@@ -33,6 +33,15 @@ const ENGINES = {
 };
 const MODELS = Object.values(ENGINES).flat();
 
+// t94-part1：三列级联数据映射（任务类型→引擎→模型/档位）——供 t94 前端级联下拉使用；
+// engine 子树复用既有 ENGINES（单一事实源，此处在其后定义避免 TDZ），OCR/H3 为组件档位。
+const DEPLOY_CATALOG = {
+  levels: ["type", "engine", "model"],
+  engine: ENGINES,
+  ocr: { options: null },        // OCR 无模型/档位：直接安装
+  h3: { options: { "h3-fast": "快档（q4·秒级）", "h3-hd": "高清（q8·分钟级）" } },
+};
+
 // ---------- 工具 ----------
 
 function json(data, status = 200, headers = {}) {
@@ -552,7 +561,9 @@ async function handleAdminDevices(env, url) {
   }
   // t78 UI 反馈：稳定键排序（hostname→device_id），心跳 last_seen 变化不再引起行顺序跳动
   devices.sort((a, b) => (a.hostname || a.device_id || "").localeCompare(b.hostname || b.device_id || ""));
-  return json({ ok: true, devices, models: MODELS, engines: ENGINES, retired_hidden: retiredHidden });
+  return json({ ok: true, devices, models: MODELS, engines: ENGINES,
+                catalog: DEPLOY_CATALOG,   // t94-part1：三列级联目录（类型→引擎→模型/档位）
+                retired_hidden: retiredHidden });
 }
 
 async function handleAdminCreateBatch(request, env) {
