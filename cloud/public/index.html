@@ -169,6 +169,13 @@ const tabState = {};   // t90：每台设备当前选中的 tab（'A'=详情 | '
 // t96：键控行 DOM（device_id -> {tr, det, fp:[4 单元格 html]}）+ 详情折叠内容指纹
 const rowDom = {};
 const detailFp = {};
+// t94：三列级联——用户进行中的选择（未部署也跨轮询保持，t96 单元格范式）
+const cascadeSel = {};
+let catalog = null;   // 由 /api/admin/devices 的 catalog 字段装载（t94-part1 数据层）
+function _fallbackCatalog() {
+  return { levels: ["type","engine","model"], engine: engines || {},
+           ocr: { options: null }, h3: { options: { "h3-fast": "快档（q4·秒级）", "h3-hd": "高清（q8·分钟级）" } } };
+}
 
 function toast(msg, ok=true) {
   const t = $("toast"); t.textContent = msg;
@@ -385,6 +392,7 @@ async function refresh() {
   try {
     const j = await api("/api/admin/devices" + (showRetired ? "?include_retired=1" : ""));
     devices = j.devices; engines = j.engines || {};
+    catalog = j.catalog || _fallbackCatalog();   // t94-part1 数据层
     retiredHidden = j.retired_hidden || 0;
     renderRetiredHint();
     renderDevices(); renderChatDevs(); loadBatches();
@@ -479,16 +487,13 @@ function buildRowCells(d) {
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}`,
       `${hw || "-"}${usage}`,
       `<span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}`,
-      `<div class="row">
-        <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
-        <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
-        <button class="sm" onclick="deploy('${d.device_id}')">部署</button>
+      `<div class="row">${cascadeHtml(d, dep, ocrSt, h3St)}
         <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
         <button class="sm gray" onclick="toggleDetail('${d.device_id}')">详情</button>
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
-        <br><span style="font-size:11px;color:#94a3b8">OCR:</span> ${ocrBtns} <span style="font-size:11px;color:#94a3b8">H3:</span> ${h3Btns}
+        <br><span style="font-size:11px;color:#94a3b8">组件: OCR ${esc(ocrSt)} · H3 ${esc(h3St)}</span>
       </div>`,
     ];
 }
@@ -547,6 +552,77 @@ function renderChatDevs() {
   updateChatMode(online.find(x => x.device_id === sel.value));
 }
 
+// ---------- t94：三列级联（任务类型→引擎→模型/档位） ----------
+function cascadeState(id) {
+  const dep = (devices.find(d => d.device_id === id) || {}).deploy || {};
+  const t = $("t_" + id), e = $("e_" + id), o = $("o_" + id);
+  const st = {
+    type: t ? t.value : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text"),
+    engine: e ? e.value : (dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama"),
+    option: o ? o.value : "",
+  };
+  return st;
+}
+function cascadeOptionsHtml(st) {
+  // ③ 模型/档位：text→引擎模型清单；ocr→固定安装项；h3→档位（h3-fast/h3-hd）
+  if (st.type === "ocr") return `<option>安装 OCR</option>`;
+  if (st.type === "h3") {
+    const ops = (catalog && catalog.h3 && catalog.h3.options) || {};
+    return Object.keys(ops).map(k => `<option value="${esc(k)}" ${k === (st.option || "h3-fast") ? "selected" : ""}>${esc(k)}（${esc(ops[k])}）</option>`).join("");
+  }
+  const models = (catalog && catalog.engine && catalog.engine[st.engine]) || [];
+  return (models.length ? models : ["（无模型）"]).map(m => `<option ${m === st.option ? "selected" : ""}>${esc(m)}</option>`).join("");
+}
+function cascadeEngineHtml(st) {
+  // ② 引擎/组件：text→catalog.engine 键；ocr→OCR；h3→H3
+  if (st.type === "ocr") return `<option>OCR</option>`;
+  if (st.type === "h3") return `<option>H3</option>`;
+  return Object.keys((catalog && catalog.engine) || {}).map(e => `<option value="${esc(e)}" ${e === st.engine ? "selected" : ""}>${esc(e)}</option>`).join("");
+}
+function cascadeDeployLabel(st) {
+  return st.type === "ocr" ? "安装 OCR" : st.type === "h3" ? "安装 H3" : "部署引擎";
+}
+function cascadeHtml(d, dep, ocrSt, h3St) {
+  // 默认（老记录/未部署兼容）：dep.type → 类型；dep.engine/model → 引擎/模型
+  const prev = cascadeSel[d.device_id];
+  const st = prev || { type: dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text",
+                       engine: dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama",
+                       option: dep.model || "" };
+  return `<select id="t_${d.device_id}" onchange="cascadeChanged('${d.device_id}','type')" style="max-width:88px">
+      <option value="text" ${st.type === "text" ? "selected" : ""}>文生文</option>
+      <option value="ocr" ${st.type === "ocr" ? "selected" : ""}>图生文</option>
+      <option value="h3" ${st.type === "h3" ? "selected" : ""}>文生视频</option></select>
+    <select id="e_${d.device_id}" onchange="cascadeChanged('${d.device_id}','engine')" style="max-width:104px">${cascadeEngineHtml(st)}</select>
+    <select id="o_${d.device_id}" style="max-width:150px">${cascadeOptionsHtml(st)}</select>
+    <button class="sm" id="${d.device_id}_dep_btn" onclick="cascadeDeploy('${d.device_id}')">${cascadeDeployLabel(st)}</button>
+    <br>`;
+}
+window.cascadeChanged = (id, which) => {
+  // 联动：类型变→②引擎重置（text 取首个引擎/ocr/h3 固定）；引擎变→③模型重置为首项
+  const st = cascadeState(id);
+  if (which === "type") {
+    st.engine = st.type === "text" ? (Object.keys((catalog && catalog.engine) || {})[0] || "ollama") : st.type;
+    st.option = "";
+  } else if (which === "engine") {
+    st.option = "";
+  }
+  cascadeSel[id] = st;
+  const e = $("e_" + id), o = $("o_" + id), btn = $(id + "_dep_btn");
+  if (e) e.innerHTML = cascadeEngineHtml(st);
+  if (o) o.innerHTML = cascadeOptionsHtml(st);
+  if (btn) btn.textContent = cascadeDeployLabel(st);
+};
+window.cascadeDeploy = async id => {
+  const st = cascadeState(id);
+  cascadeSel[id] = st;   // 部署后保持所选（fp 稳定）
+  if (st.type === "ocr") { await ocrCmd(id, "install"); return; }
+  if (st.type === "h3") { await h3Cmd(id, "install"); return; }
+  const model = st.option;
+  if (!confirm(`在设备 ${id} 上部署 ${st.engine} · ${model}？`)) return;
+  try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine: st.engine, model }) });
+        toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
+  catch (e) { toast(e.message, false); }
+};
 window.engineChanged = id => {
   const e = $("e_" + id).value;
   const m = $("m_" + id);
