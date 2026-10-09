@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.4"
+VERSION = "0.6.5"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -555,9 +555,11 @@ def report_progress(step, state, detail=""):
 def report_deploy_result(ok, tunnel_url="", api_key="", engine="", model=""):
     payload = {"deploy": {"state": "online" if ok else "failed",
                           "type": "engine",   # t78 唯一部署槽：类型权威字段
-                          "engine": engine, "model": model,
-                          "tunnel_url": tunnel_url,
-                          "model_api_key": api_key, "ts": int(time.time())}}
+                          "engine": engine if ok else "", "model": model if ok else "",
+                          "version": "",      # t79 F2：失败路径显式清 version/保留键（云端浅合并会用空串覆盖旧残留）
+                          "tunnel_url": tunnel_url if ok else "",
+                          "model_api_key": api_key if ok else "",
+                          "ts": int(time.time())}}
     # 结果心跳为单次投递：真机偶发 TLS 握手超时（t4 实测复现）会整包丢失，
     # 导致云管 deploy 记录缺 Key/隧道 → UI 聊天失效。重试 3 次直至成功。
     for attempt in range(3):
@@ -1044,6 +1046,7 @@ def _start_component_tunnel(port):
 
 def handle_command(cmd):
     ctype = cmd.get("type")
+    action = cmd.get("action", "")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
     try:
         if ctype in ("deploy", "stop", "restart_tunnel"):
@@ -1093,7 +1096,20 @@ def handle_command(cmd):
         log("指令执行失败: %s" % e)
         traceback.print_exc()
         report_progress("command", "fail", str(e)[:300])
-        report_deploy_result(False, model=cmd.get("model", ""))
+        # t79 F2：失败路径唯一部署槽清理——组件（ocr/h3）失败标记失败态并清 version 残留，
+        # 引擎失败走 report_deploy_result(False)（其 payload 已清 version/engine/model）
+        if ctype == "ocr":
+            _atomic_write(_ocr_marker, json.dumps({"state": "failed", "ts": int(time.time())}))
+            _set_component_deploy({"type": "ocr", "state": "failed", "version": "",
+                                   "ts": int(time.time())})
+            report_progress("ocr", "fail", str(e)[:300])
+        elif ctype == "h3":
+            _atomic_write(_h3_marker, json.dumps({"state": "failed", "ts": int(time.time())}))
+            _set_component_deploy({"type": "h3", "state": "failed", "version": "",
+                                   "ts": int(time.time())})
+            report_progress("h3", "fail", str(e)[:300])
+        else:
+            report_deploy_result(False, model=cmd.get("model", ""))
 
 def main():
     if not API_BASE or API_BASE.startswith("__"):
