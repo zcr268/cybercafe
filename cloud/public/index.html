@@ -541,6 +541,14 @@ function renderDevices() {
   expandedDevs.forEach(id => fillDetail(id));
 }
 
+// t98-EGO 复检抓回：t96 重写 renderDevices 时误删 chatLabel（聊天下拉标签函数）——
+// 缺失致 renderChatDevs 抛 ReferenceError，聊天下拉空、OCR/H3 聊天形态全断。此处恢复。
+function chatLabel(d) {
+  const dep = d.deploy || {};
+  if (dep.type === "ocr") return "OCR " + (dep.version || "");
+  if (dep.type === "h3") return "H3 " + (dep.version || "");
+  return (dep.engine || "") + " " + (dep.model || "");
+}
 function renderChatDevs() {
   // 聊天下拉：在线 + 有隧道 + 引擎/H3/OCR 当前部署之一（t78 唯一部署模型）
   const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url) &&
