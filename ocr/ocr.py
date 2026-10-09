@@ -174,7 +174,11 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 def serve():
-    srv = HTTPServer(("127.0.0.1", PORT), Handler)
+    HOST = os.environ.get("OCR_HOST", "127.0.0.1")   # t98：容器化绑 0.0.0.0（docker -p 可达），原生默认环回
+    argv = sys.argv[1:]
+    if "--host" in argv:                              # --host 0.0.0.0（Dockerfile CMD 传参）
+        HOST = argv[argv.index("--host") + 1]
+    srv = HTTPServer((HOST, PORT), Handler)
     print(f"[cybercafe-ocr] HTTP 服务已启动: http://127.0.0.1:{PORT}  (POST /ocr, GET /health)",
           flush=True)
     srv.serve_forever()
