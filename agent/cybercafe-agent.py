@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.9"
+VERSION = "0.6.10"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -98,6 +98,8 @@ def collect_device_info():
         "ips": [],
         "net": [],
         "agent_version": VERSION,
+        "hw_id": HW_ID,
+        "hw_source": HW_SRC,
     }
     # machine_id：与基础镜像 provision（provision.sh 采集 /etc/machine-id）一致，
     # 云端据此关联设备记录与批次来源
@@ -446,6 +448,64 @@ def collect_usage():
     u["gpu_driver"] = _gpu_driver()   # 驱动版本（静态，缓存，NVML 优先）
     return u
 
+# ---------------------------------------------------------------- 硬件指纹（t101）
+# 与 provision.sh 的 hw_fingerprint 同语义：GPU UUID（/proc 优先 → nvidia-smi 兜底，
+# 仅接受 ^GPU-[0-9A-Fa-f-]+$ fullmatch）→ 物理网卡 MAC → machine-id。
+# 指纹由注册/心跳随 device 载荷上报，云端 handleRegister/handleHeartbeat 的 {...old,...upd}
+# merge 会原位更新设备记录 hw_id/hw_source（升级通道自然迁移路径，t101）。
+def hw_fingerprint():
+    uuids = []
+    try:
+        import glob
+        for inf in sorted(glob.glob("/proc/driver/nvidia/gpus/*/information")):
+            with open(inf, errors="replace") as f:
+                for line in f:
+                    if line.startswith("GPU UUID:"):
+                        u = line.split(":", 1)[1].strip()
+                        if re.fullmatch(r"GPU-[0-9A-Fa-f-]+", u):
+                            uuids.append(u)
+    except Exception:
+        pass
+    if uuids:
+        joined = "|".join(sorted(uuids))
+        return hashlib.sha256(joined.encode()).hexdigest()[:12], "gpu"
+    rc, out = run("nvidia-smi --query-gpu=gpu_uuid --format=csv,noheader 2>/dev/null")
+    if rc == 0:
+        uuids = [u.strip() for u in out.splitlines() if re.fullmatch(r"GPU-[0-9A-Fa-f-]+", u.strip())]
+        if uuids:
+            joined = "|".join(sorted(uuids))
+            return hashlib.sha256(joined.encode()).hexdigest()[:12], "gpu"
+    macs = []
+    try:
+        for entry in sorted(os.listdir("/sys/class/net")):
+            if entry == "lo" or entry.startswith(("docker", "veth", "br-", "virbr", "tun", "tap",
+                                                  "tailscale", "zt", "wg", "gre", "sit", "erspan",
+                                                  "ip6", "vti")):
+                continue
+            try:
+                with open("/sys/class/net/%s/address" % entry) as f:
+                    ma = f.read().strip()
+                if ma and ma != "00:00:00:00:00:00":
+                    macs.append(ma)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if macs:
+        joined = "|".join(sorted(macs))
+        return hashlib.sha256(joined.encode()).hexdigest()[:12], "mac"
+    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            with open(p) as f:
+                v = f.read().strip()
+                if v:
+                    return v[-12:], "machine-id"
+        except Exception:
+            pass
+    return "", ""
+
+HW_ID, HW_SRC = hw_fingerprint()
+
 # ---------------------------------------------------------------- 云端交互
 
 def register():
@@ -533,7 +593,8 @@ def heartbeat(extra=None):
     payload = {"device": {"device_id": device_id(), "agent_version": VERSION,
                           "last_seen": int(time.time()), "usage": collect_usage(),
                           "layers": collect_layers(),
-                          "components": components}}
+                          "components": components,
+                          "hw_id": HW_ID, "hw_source": HW_SRC}}
     # t78 唯一部署模型：组件部署的 deploy 状态随心跳上报（H3 running/installed、
     # OCR installed 常驻），deploy.state 与 components.* 一致；引擎 deploy 仍走 L3 上报
     if _component_deploy:
@@ -997,13 +1058,11 @@ def _stop_engine_containers():
     # L3 ENGINES 表为单一事实源（ENGINES = {ollama:{container:"ollama"}, vllm:{container:"vllm"},
     # sglang:{container:"sglang"}} + chatgw + cloudflared 隧道容器）。任何引擎容器名改动须同步
     # 此处并与 L3 对齐（t86 真机捕获：旧清单 'vllm-openai' 与实际 'vllm' 不一致致互斥失效）。
-    # t98：互斥清单含 OCR 容器 cybercafe-ocr（docker 化后停 OCR 亦经此链）
-    run("docker rm -f ollama vllm sglang cloudflared chatgw cybercafe-ocr 2>/dev/null || true", timeout=60)
+    run("docker rm -f ollama vllm sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
 
 def _stop_ocr_server():
-    """互斥：停 OCR——t98 容器形态 docker rm -f 优先（替代 systemctl/pkill），旧形态兜底"""
-    run("docker rm -f cybercafe-ocr 2>/dev/null || true; "
-        "systemctl stop cybercafe-ocr.service 2>/dev/null || true; "
+    """互斥：停 OCR 服务——真机为 systemd 单元（t92：systemctl stop 优先），pkill 兜底"""
+    run("systemctl stop cybercafe-ocr.service 2>/dev/null || true; "
         "if [ -f /opt/cybercafe-ocr/ocr.pid ]; then kill -9 $(cat /opt/cybercafe-ocr/ocr.pid) 2>/dev/null || true; fi; "
         "pkill -9 -f 'ocr.py --serve' 2>/dev/null || true", timeout=30)
 
@@ -1131,8 +1190,7 @@ def _lru_recycle(target_gb):
                 continue
             img = parts[2].strip()
             if not img or img in keep_img or not any(k in img for k in
-                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw",
-                     "cybercafe-ocr", "ghcr", "mirror")):
+                    ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
                 continue
             rows.append((parts[1].strip(), img))   # (CreatedAt, image)
         rows.sort(key=lambda r: r[0])              # 升序 → 最近最少使用（最旧）优先
