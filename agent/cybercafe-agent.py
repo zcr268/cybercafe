@@ -1102,12 +1102,14 @@ def handle_command(cmd):
         log("指令执行失败: %s" % e)
         traceback.print_exc()
         report_progress("command", "fail", str(e)[:300])
-        # t85 F2：异常路径按指令类型如实上报失败槽位（引擎/OCR/H3），version 清空
+        # t85 F2：异常路径按指令类型如实上报失败槽位（引擎/OCR/H3），version 清空；
+        # 引擎专用 report_deploy_result 仅在 deploy 指令时调用（避免覆盖 h3/ocr 的失败类型）
         fail_type = "engine" if ctype == "deploy" else (ctype if ctype in ("ocr", "h3") else "engine")
         _clear_component_deploy()
         heartbeat({"deploy": {"type": fail_type, "state": "failed", "version": None,
                               "ts": int(time.time())}})
-        report_deploy_result(False, model=cmd.get("model", ""))
+        if ctype == "deploy":
+            report_deploy_result(False, model=cmd.get("model", ""))
 
 def main():
     if not API_BASE or API_BASE.startswith("__"):
