@@ -166,6 +166,9 @@ let devices = [], engines = {}, logDevice = null, logTimer = null;
 const expandedDevs = new Set();
 const logIntervals = {};
 const tabState = {};   // t90：每台设备当前选中的 tab（'A'=详情 | 'B'=日志），重渲染/轮询保持
+// t96：键控行 DOM（device_id -> {tr, det, fp:[4 单元格 html]}）+ 详情折叠内容指纹
+const rowDom = {};
+const detailFp = {};
 
 function toast(msg, ok=true) {
   const t = $("toast"); t.textContent = msg;
@@ -300,7 +303,7 @@ $("btnBatch").onclick = async () => {
 async function loadBatches() {
   try {
     const j = await api("/api/admin/batches");
-    $("batchRows").innerHTML = j.batches.map(b => {
+    const _batchHtml = j.batches.map(b => {
       const full = b.quota != null && (b.used || 0) >= b.quota;
       const expired = b.expired;
       const st = expired ? "已过期" : full ? "已满" : "可用";
@@ -315,6 +318,7 @@ async function loadBatches() {
         </div></td>
       </tr>`;
     }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无批次。点「生成批次码」创建。</td></tr>`;
+    if ($("batchRows").innerHTML !== _batchHtml) $("batchRows").innerHTML = _batchHtml;   // t96：内容对比零重建
   } catch (e) { /* 401 由 api() 统一处理 */ }
 }
 
@@ -417,29 +421,22 @@ window.cleanupNow = async () => {
   } catch (e) { toast(e.message, false); }
 };
 
-function renderDevices() {
-  $("devRows").innerHTML = devices.map(d => {
+function buildRowCells(d) {
     const dep = d.deploy || {};
-    const isOn = d.online === true;   // 心跳语义：状态列主状态 = 在线/离线（非部署状态）
+    const isOn = d.online === true;
     const hwBase = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
       .filter(Boolean).join("<br>");
-    // 物理网卡行（多网卡多行；缺失字段跳过该段）+ 云侧来源外网 IP 行
-    const netRows = (d.net || []).map(n => {
-      const seg = [n.iface, n.ip, n.mac].filter(Boolean).join(" · ");
-      return seg ? esc(seg) : "";
-    }).filter(Boolean).join("<br>");
+    const netRows = (d.net || []).map(n => { const seg = [n.iface, n.ip, n.mac].filter(Boolean).join(" · "); return seg ? esc(seg) : ""; }).filter(Boolean).join("<br>");
     const extIp = d.remote_ip ? `外网 ${esc(d.remote_ip)}` : "";
     const hwSrc = d.hw_source ? `指纹来源 ${esc(d.hw_source)}` : "";
-    const drv = ((d.usage || {}).gpu_driver) || d.gpu_driver || null;   // t71：驱动版本（心跳上报）
+    const drv = ((d.usage || {}).gpu_driver) || d.gpu_driver || null;
     const drvLine = drv != null ? `驱动 ${esc(drv)}` : "";
     const hw = [hwBase, netRows, extIp, hwSrc, drvLine].filter(Boolean).join("<br>");
-    // t71：引擎兼容徽标——由设备实时驱动版本与引擎要求表比较得出（动态计算，禁止静态文案）
-    const REQ = { strata: { min: 580, code: "✗", bad: `需驱动 ≥580，当前 ${drv}` },
-                  ollama: { min: 550, code: "⚠", bad: `${drv} 会退化 CPU` } };
+    const REQ = { strata: { min: 580, code: "✗", bad: `需驱动 ≥580，当前 ${drv}` }, ollama: { min: 550, code: "⚠", bad: `${drv} 会退化 CPU` } };
     const drvNum = drv != null ? parseFloat(drv) : null;
     const badge = en => {
       const r = REQ[en];
-      if (drvNum == null) return `<span style="font-size:11px;color:#94a3b8" title="无驱动信息">${en} ?</span>`;   // 未知态不误报
+      if (drvNum == null) return `<span style="font-size:11px;color:#94a3b8" title="无驱动信息">${en} ?</span>`;
       const ok = drvNum >= r.min;
       return `<span style="font-size:11px" title="${esc(r.bad)}">${en} ${ok ? "✓" : r.code}${ok ? "" : `(${esc(r.bad)})`}</span>`;
     };
@@ -458,20 +455,16 @@ function renderDevices() {
         : h3St === "uninstalled" ? `<button class="sm" onclick="h3Cmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(h3St)}</span>`;
     const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
       : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
-    // t78 唯一部署模型：OCR/H3 不再独立区块/行——按钮并入「操作」列的部署入口（引擎选择同一处），
-    // 状态并入下方唯一「当前部署」槽；此处只保留引擎兼容徽标
     const compLine = badgeLine;
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
     const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
-    // t78 唯一部署槽：引擎/OCR/H3/无 + 状态 + 版本（组件 deploy 由 agent 上报 type/state/version）
     const depType = dep.type || (dep.engine ? "engine" : "");
     const depComp = depType === "ocr" ? "OCR" : depType === "h3" ? "H3" : depType === "engine" ? `${dep.engine} ${dep.model||""}` : "";
     const slotLine = depComp
       ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
       : `<br><span style="font-size:12px;color:#64748b">当前部署: 无</span>`;
-    // 部署状态/进度条仅在设备在线且引擎部署时展示（组件状态机 installing→installed/running 无进度条）
     const isEngine = depType === "engine";
     const deployInfo = isOn ? `
       ${isEngine ? `<span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}` : ""}
@@ -480,13 +473,13 @@ function renderDevices() {
     const ly = d.layers || {};
     const lyLine = (ly.install || ly.provision || ly.agent)
       ? `<div style="font-size:11px;color:#64748b;margin-top:2px">L1 v${esc((ly.install||{}).version||"—")} · v${esc((ly.provision||{}).version||"—")} · L2 v${esc((ly.agent||{}).version||"—")}${ly.channel ? ` · 通道 ${esc(ly.channel)}` : ""}</div>` : "";
-    return `<tr>
-      <td><span class="dot ${isOn ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
+    return [
+      `<span class="dot ${isOn ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
-          <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}</td>
-      <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
-      <td><span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}</td>
-      <td><div class="row">
+          <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}`,
+      `${hw || "-"}${usage}`,
+      `<span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}`,
+      `<div class="row">
         <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
         <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
         <button class="sm" onclick="deploy('${d.device_id}')">部署</button>
@@ -496,44 +489,60 @@ function renderDevices() {
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
         <br><span style="font-size:11px;color:#94a3b8">OCR:</span> ${ocrBtns} <span style="font-size:11px;color:#94a3b8">H3:</span> ${h3Btns}
-      </div></td>
-    </tr>
-    <tr id="detail_${d.device_id}" style="display:${expandedDevs.has(d.device_id) ? "" : "none"}"></tr>`;
-  }).join("") || `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
-  // t78 UI 反馈：折叠展开态跨轮询/刷新保持（用户手动关），刷新后重填展开内容
-  expandedDevs.forEach(id => { fillDetail(id); });
+      </div>`,
+    ];
 }
 
-// t78：聊天窗按所选设备「当前部署」类型切换交互形态（引擎/H3=文本、OCR=图片），仍一个窗口
-function chatLabel(d) {
-  const dep = d.deploy || {};
-  if (dep.type === "ocr") return `OCR ${dep.version || ""}`;
-  if (dep.type === "h3") return `H3 ${dep.version || ""}`;
-  return `${dep.engine || ""} ${dep.model || ""}`;
+function renderDevices() {
+  // t96：键控调和——行按 device_id 复用，单元格指纹对比仅更新变化格；新增/移除行；顺序调和保持稳定排序
+  const tbody = $("devRows");
+  const seen = new Set();
+  for (const d of devices) {
+    seen.add(d.device_id);
+    const fp = buildRowCells(d);
+    let R = rowDom[d.device_id];
+    if (!R) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${fp[0]}</td><td>${fp[1]}</td><td>${fp[2]}</td><td>${fp[3]}</td>`;
+      const det = document.createElement("tr");
+      det.id = "detail_" + d.device_id;
+      det.style.display = expandedDevs.has(d.device_id) ? "" : "none";
+      tr.after(det);
+      R = rowDom[d.device_id] = { tr, det, fp };
+      tbody.appendChild(tr);
+      continue;
+    }
+    const tds = R.tr.children;
+    for (let i = 0; i < 4; i++) if (R.fp[i] !== fp[i]) { tds[i].innerHTML = fp[i]; R.fp[i] = fp[i]; }
+  }
+  for (const id of Object.keys(rowDom)) if (!seen.has(id)) {
+    rowDom[id].tr.remove(); rowDom[id].det.remove(); delete rowDom[id];
+  }
+  // 顺序调和：walk 排序后的 devices，DOM 顺序不符才 insertBefore 移动（无变化不挪动）
+  let cursor = tbody.firstElementChild;
+  if (cursor && cursor.tagName !== "TR") cursor = cursor.nextElementSibling;
+  for (const d of devices) {
+    const R = rowDom[d.device_id];
+    if (!R) continue;
+    if (cursor === R.tr) {
+      cursor = R.tr.nextElementSibling === R.det ? R.det.nextElementSibling : R.tr.nextElementSibling;
+    } else {
+      tbody.insertBefore(R.tr, cursor === tbody.firstElementChild ? cursor : cursor || null);
+      cursor = R.tr.nextElementSibling === R.det ? R.det.nextElementSibling : R.tr.nextElementSibling;
+    }
+  }
+  if (!devices.length && !tbody.querySelector("tr")) tbody.innerHTML = `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
+  expandedDevs.forEach(id => fillDetail(id));
 }
-function updateChatMode(d) {
-  // t89：按当前部署类型实时决定聊天窗形态（引擎/H3/OCR/未知），仍一个窗口
-  const dep = (d && d.deploy) || null;
-  const isOcr = !!(dep && dep.type === "ocr");
-  const isVid = !!(dep && dep.type === "h3");     // H3 = 文生视频（/sdcpp/v1/vid_gen）
-  $("ocrIn").style.display = isOcr ? "" : "none";
-  $("vidIn").style.display = isVid ? "" : "none";
-  $("chatIn").style.display = (isOcr || isVid) ? "none" : "";
-  $("btnSend").style.display = (isOcr || isVid) ? "none" : "";
-  const t = (dep && dep.tunnel_url) || "";
-  if (!d) { $("chatMeta").textContent = "无在线模型设备"; return; }
-  if (isOcr) { $("chatMeta").textContent = "OCR 图片识别 → 文字回显 · " + t; return; }
-  if (isVid) { $("chatMeta").textContent = "H3 文生视频（/sdcpp/v1/vid_gen）· " + t; return; }
-  if (dep && ["engine",""].includes(dep.type) || (dep && dep.engine)) { $("chatMeta").textContent = "文本聊天 · " + t; return; }
-  $("chatMeta").textContent = "当前部署类型不可用（仅支持 文本/OCR 图片/H3 文生视频）· " + t;   // 未部署/未知态不报错
-}
+
 function renderChatDevs() {
   // 聊天下拉：在线 + 有隧道 + 引擎/H3/OCR 当前部署之一（t78 唯一部署模型）
   const online = devices.filter(d => d.online === true && d.deploy && safeUrl(d.deploy.tunnel_url) &&
     (d.deploy.engine || d.deploy.type === "h3" || d.deploy.type === "ocr"));
   const sel = $("chatDev");
   const cur = sel.value;
-  sel.innerHTML = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(chatLabel(d))}）</option>`).join("");
+  const _chatHtml = online.map(d => `<option value="${d.device_id}">${esc(d.hostname||d.device_id)}（${esc(chatLabel(d))}）</option>`).join("");
+  if (sel.innerHTML !== _chatHtml) sel.innerHTML = _chatHtml;   // t96：集合未变不重建
   if (online.find(d => d.device_id === cur)) sel.value = cur;
   updateChatMode(online.find(x => x.device_id === sel.value));
 }
@@ -721,7 +730,7 @@ async function fillDetail(id) {
   const d = devices.find(x => x.device_id === id) || {};
   // t78 UI 反馈：详情折叠用深色面板配色（#0f172a 同页头脚本面板）；内含 详情|日志 两个 tab
   const curTab = tabState[id] || "A";   // t90：按记忆应用 tab（默认详情），轮询重渲染不跳回
-  tr.innerHTML = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
+  const _detailHtml = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
     <div class="row" style="margin-bottom:6px">
       <button class="sm" id="tabA_${id}" onclick="switchTab('${id}','A')">详情</button>
       <button class="sm gray" id="tabB_${id}" onclick="switchTab('${id}','B')">日志</button>
@@ -729,6 +738,13 @@ async function fillDetail(id) {
     <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0;display:${curTab === "A" ? "" : "none"}">${layersDetail(d)}</div>
     <div id="tabB_${id}_body" style="display:${curTab === "B" ? "" : "none"};font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
   </td>`;
+  if (detailFp[id] === _detailHtml) {   // t96：数据未变不重绘折叠（附简要重同步 tab 高亮）
+    if (curTab === "B") { const a = $("tabA_" + id), b = $("tabB_" + id); if (a && b) { a.className = "sm gray"; b.className = "sm"; } }
+    await loadLogTab(id);
+    return;
+  }
+  detailFp[id] = _detailHtml;
+  tr.innerHTML = _detailHtml;
   if (curTab === "B") { $("tabA_" + id).className = "sm gray"; $("tabB_" + id).className = "sm"; }
   await loadLogTab(id);
 }
