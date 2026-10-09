@@ -81,13 +81,14 @@ h3_diff_name() {  # h3_diff_name <quant> -> stdout 权重文件名
 }
 
 h3_run_server() {  # h3_run_server <diff_name>：docker run --gpus all（te=cpu / denoiser+VAE cuda0）
+  # CMD 从 --diffusion-model 开始（ENTRYPOINT 已是 ./sd-server，t99 真机抓出重复二进制名错误：
+  # CMD 以 sd-server 开头会被当作参数传给 ENTRYPOINT → unknown argument: sd-server）
   docker run -d --name "$H3_CONTAINER" --gpus all --restart unless-stopped \
     -p "127.0.0.1:$H3_PORT:11435" \
     -v "$H3_VOLUME:/models" \
     -e H3_QUANT="$H3_QUANT" \
     "$H3_IMAGE:$H3_TAG" \
-    sd-server \
-      --diffusion-model "/models/$1" \
+    --diffusion-model "/models/$1" \
       --vae "/models/minimax_h3_video_vae_fp16.safetensors" \
       --audio-vae "/models/minimax_h3_audio_vae_fp32.safetensors" \
       --llm "/models/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" \
