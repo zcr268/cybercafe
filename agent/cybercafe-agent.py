@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -361,6 +361,37 @@ def _gpu_samples():
             return (best[0], best[1], best[2], "nvidia-smi")
     return None
 
+_gpu_driver_val = None
+
+def _gpu_driver():
+    """GPU 驱动版本：NVML nvmlSystemGetDriverVersion 优先（不依赖 nvidia-smi），失败回退
+    nvidia-smi --query-gpu=driver_version；驱动为静态信息 → 模块级缓存，不每心跳重取。"""
+    global _gpu_driver_val
+    if _gpu_driver_val is not None:
+        return _gpu_driver_val
+    v = None
+    if _nvml_load():                     # t49 NVML 直连（ctypes，不依赖 nvidia-smi）
+        lib = _nvml_state["lib"]
+        try:
+            fn = lib.nvmlSystemGetDriverVersion
+            fn.restype = ctypes.c_int
+            buf = ctypes.create_string_buffer(256)
+            if fn(buf, ctypes.c_uint(256)) == 0:
+                v = buf.value.decode("utf-8", "replace").strip()
+        except Exception:
+            pass
+    if not v:
+        rc, out = run("nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null", timeout=15)
+        if rc == 0:
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if line:
+                    v = line.split(",")[0].strip()
+                    break
+    if v:
+        _gpu_driver_val = v
+    return v
+
 def collect_usage():
     """采集 CPU/内存/GPU 用量。
 
@@ -412,6 +443,7 @@ def collect_usage():
     else:
         # 双源皆败：如实标记来源，不写 gpu_util_pct/gpu_mem_used_mb（缺失语义，UI 不显示为 0）
         u["gpu_src"] = "none"
+    u["gpu_driver"] = _gpu_driver()   # 驱动版本（静态，缓存，NVML 优先）
     return u
 
 # ---------------------------------------------------------------- 云端交互
@@ -491,9 +523,11 @@ def collect_layers(force=False):
     return data
 
 def heartbeat(extra=None):
+    ocr = _ocr_state()
     payload = {"device": {"device_id": device_id(), "agent_version": VERSION,
                           "last_seen": int(time.time()), "usage": collect_usage(),
-                          "layers": collect_layers()}}
+                          "layers": collect_layers(),
+                          "components": {"ocr": ocr} if ocr else {}}}
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -757,6 +791,76 @@ def self_update(server_version):
 
 # ---------------------------------------------------------------- 主循环
 
+_ocr_marker = "/opt/cybercafe-ocr/.ocr-state"
+
+def _ocr_state():
+    """components.ocr：读本机 OCR 安装状态标记（install/uninstall 流程写）；缺标记不报。"""
+    try:
+        with open(_ocr_marker) as f:
+            return json.loads(f.read())
+    except Exception:
+        return None
+
+def _fetch_ocr(script_name, out_path, mode=0o755):
+    src = _fetch_extra(script_name)
+    if not src or len(src) < 64:
+        raise RuntimeError("OCR 脚本 %s 拉取失败/长度异常（%d 字节）" % (script_name, len(src or "")))
+    if not (src.startswith("#!") or "#!/" in src[:2]):
+        raise RuntimeError("OCR 脚本 %s 校验失败（缺 shebang）" % script_name)
+    _atomic_write(out_path, src, mode)
+    return src
+
+def run_ocr(action):
+    """OCR 安装/卸载：云端拉取 install.sh/ocr.py/uninstall.sh → 校验 → 执行 → 状态回传。
+    与 L3 同纪律：拉不到/校验不过 → 如实 fail，绝不静默成功。"""
+    import json as _json
+    ocr_dir = "/opt/cybercafe-ocr"      # 安装目标（venv/服务/数据）
+    src_dir = "/opt/cybercafe-ocr-src"  # 脚本源目录（与 OCR_DIR 分离：install.sh 用
+    #  cp 装 ocr.py 到 OCR_DIR，若 SCRIPT_DIR==OCR_DIR 会 cp 同文件触发 set -e 中止）
+    os.makedirs(src_dir, exist_ok=True)
+    if action == "install":
+        _fetch_ocr("ocr/ocr.py", src_dir + "/ocr.py")
+        _fetch_ocr("ocr/install.sh", src_dir + "/install.sh")
+        st = {"state": "installing", "ts": int(time.time())}
+        _atomic_write(_ocr_marker, _json.dumps(st))
+        report_progress("ocr", "running", "OCR 安装执行中（venv+pip+服务，首次较久）")
+        # stdout/stderr 重定向到日志文件：install.sh 后台启动的 ocr.py 服务会继承管道 fd，
+        # 若用 PIPE 捕获，run() 会因管道不关闭而挂到超时（服务一直活着）；重定向后管道随
+        # 子 shell 退出即关闭，run() 正常返回，日志留痕供失败时诊断。
+        logp = ocr_dir + "/ocr-install.log"
+        rc, out = run("bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=600)
+        if rc != 0:
+            try:
+                tail = open(logp).read()[-300:]
+            except Exception:
+                tail = out[-100:]
+            raise RuntimeError("OCR 安装失败: " + tail)
+        import hashlib as _h
+        try:
+            ver = "ocr-" + _h.sha256(open(ocr_dir + "/ocr.py", "rb").read()).hexdigest()[:8]
+        except Exception:
+            ver = None
+        _atomic_write(_ocr_marker, _json.dumps({"state": "installed", "version": ver, "ts": int(time.time())}))
+        report_progress("ocr", "ok", "OCR 安装完成（" + str(ver) + "）")
+        return 0
+    if action == "uninstall":
+        _fetch_ocr("ocr/uninstall.sh", src_dir + "/uninstall.sh")
+        st = {"state": "uninstalling", "ts": int(time.time())}
+        _atomic_write(_ocr_marker, _json.dumps(st))
+        report_progress("ocr", "running", "OCR 卸载执行中")
+        logp = ocr_dir + "/ocr-uninstall.log"
+        rc, out = run("bash " + src_dir + "/uninstall.sh > " + logp + " 2>&1", timeout=300)
+        if rc != 0:
+            try:
+                tail = open(logp).read()[-300:]
+            except Exception:
+                tail = out[-100:]
+            raise RuntimeError("OCR 卸载失败: " + tail)
+        _atomic_write(_ocr_marker, _json.dumps({"state": "uninstalled", "ts": int(time.time())}))
+        report_progress("ocr", "ok", "OCR 已卸载")
+        return 0
+    raise RuntimeError("未知 OCR action: %s" % action)
+
 def handle_command(cmd):
     ctype = cmd.get("type")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
@@ -773,6 +877,14 @@ def handle_command(cmd):
                 report_deploy_result(False, model=cmd.get("model", ""))
             else:
                 log("L3 执行完成（rc=0，结果由 L3 上报）")
+        elif ctype == "ocr":
+            action = cmd.get("action", "install")
+            report_progress("ocr", "running", "OCR 指令: %s" % action)
+            rc = run_ocr(action)
+            if rc != 0:
+                report_progress("ocr", "fail", "OCR %s 失败（rc=%d）" % (action, rc))
+            else:
+                log("OCR %s 完成" % action)
         else:
             log("未知指令类型: %s" % ctype)
     except Exception as e:

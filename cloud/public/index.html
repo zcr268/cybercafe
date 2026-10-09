@@ -409,7 +409,30 @@ function renderDevices() {
     }).filter(Boolean).join("<br>");
     const extIp = d.remote_ip ? `外网 ${esc(d.remote_ip)}` : "";
     const hwSrc = d.hw_source ? `指纹来源 ${esc(d.hw_source)}` : "";
-    const hw = [hwBase, netRows, extIp, hwSrc].filter(Boolean).join("<br>");
+    const drv = ((d.usage || {}).gpu_driver) || d.gpu_driver || null;   // t71：驱动版本（心跳上报）
+    const drvLine = drv != null ? `驱动 ${esc(drv)}` : "";
+    const hw = [hwBase, netRows, extIp, hwSrc, drvLine].filter(Boolean).join("<br>");
+    // t71：引擎兼容徽标——由设备实时驱动版本与引擎要求表比较得出（动态计算，禁止静态文案）
+    const REQ = { strata: { min: 580, code: "✗", bad: `需驱动 ≥580，当前 ${drv}` },
+                  ollama: { min: 550, code: "⚠", bad: `${drv} 会退化 CPU` } };
+    const drvNum = drv != null ? parseFloat(drv) : null;
+    const badge = en => {
+      const r = REQ[en];
+      if (drvNum == null) return `<span style="font-size:11px;color:#94a3b8" title="无驱动信息">${en} ?</span>`;   // 未知态不误报
+      const ok = drvNum >= r.min;
+      return `<span style="font-size:11px" title="${esc(r.bad)}">${en} ${ok ? "✓" : r.code}${ok ? "" : `(${esc(r.bad)})`}</span>`;
+    };
+    const badgeLine = `<br><span>${["strata", "ollama"].map(badge).join(" · ")}</span>`;
+    const ocr = (d.components || {}).ocr || {};
+    const ocrSt = ocr.state || "uninstalled";
+    const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
+      : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
+    const ocrBtns = ocrSt === "installed"
+      ? `<button class="sm gray" onclick="ocrCmd('${d.device_id}','uninstall')">卸载</button>`
+      : ocrSt === "uninstalled" ? `<button class="sm" onclick="ocrCmd('${d.device_id}','install')">安装</button>` : "";
+    const ocrLine = `<br><span style="font-size:12px"><b>OCR</b>: ${esc(ocrLabel)} ${ocrBtns}</span>`;
+    // 未知态也不隐藏（无驱动 → '?'，不误报）；OCR 行缺字段 → 未安装态 + 安装按钮
+    const compLine = badgeLine + ocrLine;
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
     const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
@@ -427,7 +450,7 @@ function renderDevices() {
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}</td>
       <td style="font-size:12px;color:#94a3b8">${hw || "-"}${usage}</td>
-      <td><span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}</td>
+      <td><span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}</td>
       <td><div class="row">
         <select id="e_${d.device_id}" onchange="engineChanged('${d.device_id}')">${Object.keys(engines).map(e => `<option value="${e}" ${e === (dep.engine||"ollama") ? "selected" : ""}>${e}</option>`).join("")}</select>
         <select id="m_${d.device_id}">${(engines[dep.engine||"ollama"]||[]).map(m => `<option ${m === (dep.model||"") ? "selected" : ""}>${m}</option>`).join("")}</select>
@@ -467,6 +490,11 @@ window.deploy = async id => {
   if (!confirm(`在设备 ${id} 上部署 ${engine} · ${model}？`)) return;
   try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine, model }) });
         toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
+  catch (e) { toast(e.message, false); }
+};
+window.ocrCmd = async (id, action) => {
+  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "ocr", action }) });
+        toast("OCR 指令已下发: " + action); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
 window.cmd = async (id, type) => {

@@ -662,12 +662,15 @@ async function handleAdminDeploy(request, env) {
 
 async function handleAdminCommand(request, env) {
   const body = await request.json().catch(() => ({}));
-  if (!body.device_id || !["stop", "restart_tunnel"].includes(body.type))
-    return json({ error: "device_id + type(stop|restart_tunnel) required" }, 400);
+  if (!body.device_id || !["stop", "restart_tunnel", "ocr"].includes(body.type))
+    return json({ error: "device_id + type(stop|restart_tunnel|ocr) required" }, 400);
+  if (body.type === "ocr" && !["install", "uninstall"].includes(body.action))
+    return json({ error: "ocr action(install|uninstall) required" }, 400);
   const exists = await env.CYBERCAFE_KV.get(`device:${body.device_id}`, "json");
   if (!exists) return json({ error: "device not found" }, 404);
   await env.CYBERCAFE_KV.put(`cmd:${body.device_id}`,
-    JSON.stringify({ type: body.type, created_at: Math.floor(Date.now() / 1000) }));
+    JSON.stringify({ type: body.type, ...(body.action ? { action: body.action } : {}),
+                     created_at: Math.floor(Date.now() / 1000) }));
   return json({ ok: true });
 }
 
@@ -706,6 +709,9 @@ const INSTALL_EXTRA_ALLOW = {
   "cybercafe-provision.service": "agent",
   "cybercafe-deploy.py": "agent",
   "uninstall-all.sh": "root",
+  "ocr/install.sh": "root",     // t71：OCR 组件经 extra 通道下发（root 作用域 + ocr/ 子路径）
+  "ocr/uninstall.sh": "root",
+  "ocr/ocr.py": "root",
 };
 
 async function handleInstallSh(request, env, url) {
