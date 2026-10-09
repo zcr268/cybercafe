@@ -992,7 +992,10 @@ def _clear_component_deploy():
 
 def _stop_engine_containers():
     """互斥：停引擎容器 + 网关/隧道（L3 cmd_stop 同款清单，best-effort）"""
-    # t91：容器名与 L3 ENGINES 配置一致（真实为 vllm，非 vllm-openai——旧清单漏停 vllm）
+    # t91（F1）：互斥停引擎容器名清单——【同步维护点】必须以 agent/cybercafe-deploy.py 的
+    # L3 ENGINES 表为单一事实源（ENGINES = {ollama:{container:"ollama"}, vllm:{container:"vllm"},
+    # sglang:{container:"sglang"}} + chatgw + cloudflared 隧道容器）。任何引擎容器名改动须同步
+    # 此处并与 L3 对齐（t86 真机捕获：旧清单 'vllm-openai' 与实际 'vllm' 不一致致互斥失效）。
     run("docker rm -f ollama vllm sglang cloudflared chatgw 2>/dev/null || true", timeout=60)
 
 def _stop_ocr_server():
@@ -1072,6 +1075,102 @@ def _start_component_tunnel(port):
         log("组件隧道启动超时（40s 未取到 trycloudflare URL）")
     return url
 
+
+# ---------- t97：磁盘滚动回收（部署前自动 + 手动命令） ----------
+def _disk_free_gb(path="/opt"):
+    """当前磁盘余量（GB）：取文件系统可用块，失败返回 0.0 并如实（宁不部署不误判）"""
+    rc, out = run("df -m %s | tail -1 | awk '{print $4}'" % path, timeout=20)
+    try:
+        return float(out.strip()) / 1024.0
+    except Exception:
+        return 0.0
+
+def _estimate_deploy_needs(engine, model):
+    """部署前容量估算（GB 量级，含镜像+权重）：不足目标值由回收补齐"""
+    base = {"ollama": 4.0, "vllm": 9.0, "sglang": 9.0, "strata": 6.0}.get(engine or "", 6.0)
+    return base
+
+def _lru_recycle(target_gb):
+    """滚动回收（LRU 最旧先清）：① docker 悬空/构建缓存 → ② 非当前部署的旧引擎镜像
+    （含 mirror 前缀）→ ③ 非当前模型的 HF 缓存/旧权重 → ④ 旧组件残留。
+    红线段绝不碰：当前正在运行的部署、agent 自身/systemd/KEEP_PATHS。返回 (freed_gb, items)。"""
+    free_0 = _disk_free_gb()
+    freed = 0.0
+    items = []
+    def df_now():
+        return _disk_free_gb()
+    def note(kind, detail):
+        items.append("%s:%s" % (kind, detail))
+    def __delta():
+        nonlocal freed
+        freed = _disk_free_gb() - free_0   # 增量：实际腾出（GB）
+    # 当前运行部署的保留集（引擎容器镜像 + 当前组件目录）
+    keep_img = set()
+    rc, out = run("docker ps --format {{.Image}} 2>/dev/null", timeout=20)
+    for ln in out.splitlines():
+        if ln.strip():
+            keep_img.add(ln.strip())
+    keep_paths = {"/opt/cybercafe-agent", "/opt/cybercafe-ocr", "/opt/minimax-h3"}
+
+    if freed < target_gb:
+        rc1, o1 = run("docker image prune -f 2>/dev/null | tail -1", timeout=120)
+        rc2, o2 = run("docker builder prune -f 2>/dev/null >/dev/null 2>&1; echo done", timeout=120)
+        freed_d = df_now()
+        note("docker-cache", "image/builder prune")
+        __delta()
+    # ② 旧引擎镜像（保留当前运行镜像）
+    if freed < target_gb:
+        rc, out = run("docker images --format {{.Repository}}:{{.Tag}}", timeout=30)
+        gone = 0
+        for line in out.splitlines():
+            if freed >= target_gb:
+                break
+            img = line.strip()
+            if not img or img in keep_img:
+                continue
+            # 命中引擎/镜像前缀（含 mirror 组织名），只清非当前运行的
+            if any(k in img for k in ("ollama", "vllm", "sglang", "strata", "minimax", "cloudflared", "chatgw", "ghcr", "mirror")):
+                run("docker rmi -f %s >/dev/null 2>&1" % img, timeout=120)
+                gone += 1
+                freed = df_now()
+                note("old-image", img)
+        __delta()
+        if gone == 0:
+            note("old-image", "无")
+    # ③ HF 缓存非当前模型（粗粒度：清 .cache/huggingface 中非最新权重子目录，保守只清空大文件）
+    if freed < target_gb:
+        rc, out = run("du -sm /root/.cache/huggingface 2>/dev/null | awk '{print $1}'", timeout=20)
+        try:
+            hf_mb = int(out.strip() or "0")
+        except Exception:
+            hf_mb = 0
+        if hf_mb > 512:
+            run("find /root/.cache/huggingface -type f -size +200M -not -path '*%s*' -delete 2>/dev/null || true" % "", timeout=60)
+            note("hf-cache", "清权重大文件")
+        __delta()
+    # ④ 旧组件残留（非当前组件的 venv/目录大文件，保守：只清 .venv/venv 构建残留于非当前组件根）
+    if freed < target_gb:
+        run("find /opt -maxdepth 2 -name 'venv' -o -maxdepth 2 -name '.cache' 2>/dev/null | grep -v -E '%s' | xargs -r rm -rf 2>/dev/null || true" % "|".join(sorted(keep_paths)), timeout=60)
+        freed = df_now()
+        note("old-component", "残留 venv/cache")
+        __delta()
+    return freed, items
+
+def _ensure_disk_before_deploy(engine, model):
+    """部署前磁盘保障：余量足 → 直接过；不足 → 自动滚动回收；回收后仍不足 → 如实失败。
+    返回 (ok, free_gb, freed_gb, items)。"""
+    need = _estimate_deploy_needs(engine, model)
+    free0 = _disk_free_gb()
+    if free0 >= need + 1.0:
+        return (True, free0, 0.0, [])
+    log("磁盘余量不足：free=%.1fGB 需≈%.1fGB，启动滚动回收" % (free0, need))
+    freed, items = _lru_recycle(need - free0 + 1.0)
+    free1 = _disk_free_gb()
+    ok = free1 >= need + 0.5
+    detail = "磁盘检查: 前 %.1fGB 后 %.1fGB 回收 %.1fGB[%s]" % (free0, free1, freed, ",".join(items or ["无"]))
+    report_progress("disk", "ok" if ok else "fail", detail)
+    return (ok, free1, freed, items)
+
 def handle_command(cmd):
     ctype = cmd.get("type")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
@@ -1081,6 +1180,15 @@ def handle_command(cmd):
                 _stop_other_deployments("engine")   # t78 唯一部署互斥：引擎下发前停 OCR/H3
                 _clear_component_deploy()            # t78：引擎接管唯一部署槽，停止心跳重发旧组件块
                 report_progress("command", "running", "下发最新 L3 并部署 %s %s" % (cmd.get("engine"), cmd.get("model")))
+                # t97：部署前磁盘保障——不足自动滚动回收，仍不足如实取消（不假成功）
+                ok_d, free_gb, freed_gb, items = _ensure_disk_before_deploy(cmd.get("engine"), cmd.get("model"))
+                if not ok_d:
+                    report_progress("command", "fail",
+                        "磁盘空间不足（free=%.1fGB 需≈%.1fGB 回收后仍不足%s）——如实取消部署" %
+                        (free_gb, _estimate_deploy_needs(cmd.get("engine"), cmd.get("model")),
+                         ("[清:" + ",".join(items) + "]") if items else ""))
+                    report_deploy_result(False, model=cmd.get("model", ""))
+                    return
             else:
                 report_progress("command", "running", "下发最新 L3 执行 %s" % ctype)
             rc = run_l3(ctype, cmd)
@@ -1094,6 +1202,14 @@ def handle_command(cmd):
                 # engine/model/tunnel_url，但清掉残留组件 type/version 字段）
                 heartbeat({"deploy": {"type": "engine", "state": "online",
                                       "ts": int(time.time())}})
+        elif ctype == "recycle":
+            # t97 手动触发：回收 target_gb（默认 5GB），事件进设备日志（页面日志 tab 可见）
+            target = float(cmd.get("target_gb") or 5.0)
+            report_progress("disk", "running", "手动滚动回收（目标 %.1fGB）" % target)
+            freed, items = _lru_recycle(target)
+            report_progress("disk", "ok", "手动回收完成: 清理 %d 项 腾出 %.1fGB [%s]" %
+                            (len(items), freed, ",".join(items[:8])))
+            log("手动回收完成: freed=%.1fGB items=%s" % (freed, ",".join(items[:8])))
         elif ctype == "ocr":
             action = cmd.get("action", "install")
             if action == "install":
