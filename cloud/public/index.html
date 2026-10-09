@@ -519,6 +519,13 @@ function layersDetail(d) {
     if (sh !== "—" && cloudSha) mark = (sh === cloudSha) ? "✓ 一致" : "⚠ 落后";
     return `<tr><td>${label}</td><td class="mono">${esc(v)}</td><td class="mono">${esc(sh)}</td><td>${mark}</td></tr>`;
   };
+  // t76：服务单元是安装注入件——落盘即含本机 API_BASE/DEVICE_KEY/BATCH_CODE 注入值，
+  // 与云端规范件逐字节比对恒不等属设计使然（t70 验收观察到的恒 ⚠ 假警）。
+  // 方案 2：不参与 sha 一致性比对，标注『注入件·不比对』；版本/单元状态本身已覆盖健康度。
+  const svc = ly.service;
+  const svcRow = svc
+    ? `<tr title="服务单元落盘含本机注入值，逐字节比对恒不等属设计使然"><td>服务单元</td><td class="mono">${esc(svc.version||"—")}</td><td class="mono">${esc(svc.sha8||"—")}</td><td>注入件·不比对</td></tr>`
+    : "";
   const units = ly.units || {};
   const unitRows = Object.keys(units).map(u => {
     const x = units[u] || {};
@@ -530,6 +537,7 @@ function layersDetail(d) {
     ${cell("L1 install.sh", ly.install || {}, "install.sh")}
     ${cell("L1 provision.sh", ly.provision || {}, "provision.sh")}
     ${cell("L2 agent", ly.agent || {}, "cybercafe-agent.py")}
+    ${svcRow}
     ${unitRows}
     <tr><td>更新通道</td><td colspan="3">${esc(ly.channel||"—")}</td></tr>
     <tr><td>脚本最近更新</td><td colspan="3">${lastUpd}</td></tr>
