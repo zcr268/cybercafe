@@ -34,6 +34,9 @@
   .state.failed { background: #7f1d1d; color: #fca5a5; }
   .state.queued { background: #1e3a8a; color: #93c5fd; }
   .state.idle, .state.stopped, .state.offline { background: #334155; color: #cbd5e1; }
+  .state.uninstalling { background: #451a03; color: #fbbf24; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #0e7490; color: #cffafe; }
+  .note { font-size: 12px; color: #94a3b8; }
   #login { max-width: 360px; margin: 15vh auto; }
   #logbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 180px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
   #chatbox { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; height: 320px; overflow-y: auto; }
@@ -429,9 +432,72 @@ window.cleanupNow = async () => {
   } catch (e) { toast(e.message, false); }
 };
 
+// 统一状态卡（W1-2）：目标名徽章 → 状态徽章 → 进度 → 一句话
+const CARD_STATES = {
+  online:       { text: "运行中", cls: "online" },
+  running:      { text: "运行中", cls: "online" },
+  deploying:    { text: "部署中", cls: "deploying" },
+  installing:   { text: "安装中", cls: "deploying" },
+  queued:       { text: "排队",   cls: "queued" },
+  idle:         { text: "闲置",   cls: "idle" },
+  stopped:      { text: "已停止", cls: "stopped" },
+  failed:       { text: "失败",   cls: "failed" },
+  uninstalling: { text: "卸载中", cls: "uninstalling" },
+};
+function cardState(d) {
+  const dep = d.deploy || {};
+  const ocr = ((d.components || {}).ocr) || {};
+  const h3 = ((d.components || {}).h3) || {};
+  if (ocr.state === "installing" || h3.state === "installing") return "installing";
+  if (ocr.state === "uninstalling" || h3.state === "uninstalling") return "uninstalling";
+  if (dep.state && CARD_STATES[dep.state]) return dep.state;
+  if (d.state && CARD_STATES[d.state]) return d.state;
+  return "idle";
+}
+function targetName(d) {
+  const dep = d.deploy || {};
+  const ocr = ((d.components || {}).ocr) || {};
+  const h3 = ((d.components || {}).h3) || {};
+  const active = s => ["installing", "uninstalling", "installed", "running", "failed"].includes(s);
+  if (dep.type === "ocr" || active(ocr.state)) return "OCR";
+  if (dep.type === "h3" || active(h3.state)) return "H3";
+  if (dep.engine) return dep.engine;
+  return "未部署";
+}
+function oneLiner(d) {
+  const dep = d.deploy || {};
+  const st = cardState(d);
+  const parts = [];
+  if (dep.version) parts.push("v" + dep.version);
+  if (dep.detail) parts.push(dep.detail);
+  if (parts.length) return parts.join(" · ");
+  if (st === "queued") return "等待调度";
+  if (st === "failed") return "部署失败";
+  if (st === "uninstalling") return "正在卸载组件";
+  if (st === "stopped") return "服务已停止";
+  if (st === "idle") return "无部署任务";
+  return "运行正常";
+}
+function progressHtml(d) {
+  const dep = d.deploy || {};
+  const st = cardState(d);
+  if (!["online", "deploying", "installing", "queued"].includes(st)) return "";
+  if (dep.state === "queued") return barHtml("2%", 2, "blue");
+  const pct = deployPct(dep);
+  return barHtml(pct + "%", pct, st === "online" ? "okgreen" : "blue");
+}
+function statusCardHtml(d, dep) {
+  const st = cardState(d);
+  const m = CARD_STATES[st] || { text: "闲置", cls: "idle" };
+  const name = targetName(d);
+  const nameTxt = (name !== "未部署" && dep.model) ? name + " · " + dep.model : name;
+  const tunnel = safeUrl(dep.tunnel_url)
+    ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : "";
+  return `<span class="badge">${esc(nameTxt)}</span> <span class="state ${m.cls}">${m.text}</span>${progressHtml(d)}<span class="note">${esc(oneLiner(d))}</span>${tunnel}`;
+}
+
 function buildRowCells(d) {
     const dep = d.deploy || {};
-    const isOn = d.online === true;
     const hwBase = [d.cpu, d.gpu ? d.gpu + " " + Math.round((d.gpu_mem_mb||0)/1024) + "G" : "", d.mem_total_gb ? d.mem_total_gb + "G 内存" : ""]
       .filter(Boolean).join("<br>");
     const netRows = (d.net || []).map(n => { const seg = [n.iface, n.ip, n.mac].filter(Boolean).join(" · "); return seg ? esc(seg) : ""; }).filter(Boolean).join("<br>");
@@ -440,61 +506,22 @@ function buildRowCells(d) {
     const drv = ((d.usage || {}).gpu_driver) || d.gpu_driver || null;
     const drvLine = drv != null ? `驱动 ${esc(drv)}` : "";
     const hw = [hwBase, netRows, extIp, hwSrc, drvLine].filter(Boolean).join("<br>");
-    const REQ = { strata: { min: 580, code: "✗", bad: `需驱动 ≥580，当前 ${drv}` }, ollama: { min: 550, code: "⚠", bad: `${drv} 会退化 CPU` } };
-    const drvNum = drv != null ? parseFloat(drv) : null;
-    const badge = en => {
-      const r = REQ[en];
-      if (drvNum == null) return `<span style="font-size:11px;color:#94a3b8" title="无驱动信息">${en} ?</span>`;
-      const ok = drvNum >= r.min;
-      return `<span style="font-size:11px" title="${esc(r.bad)}">${en} ${ok ? "✓" : r.code}${ok ? "" : `(${esc(r.bad)})`}</span>`;
-    };
-    const badgeLine = `<br><span>${["strata", "ollama"].map(badge).join(" · ")}</span>`;
-    const ocr = (d.components || {}).ocr || {};
-    const ocrSt = ocr.state || "uninstalled";
-    const ocrBtns = ocrSt === "installed"
-      ? `<button class="sm gray" onclick="ocrCmd('${d.device_id}','uninstall')">卸载</button>`
-      : ocrSt === "uninstalled" ? `<button class="sm" onclick="ocrCmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(ocrSt)}</span>`;
-    const h3 = (d.components || {}).h3 || {};
-    const h3St = h3.state || "uninstalled";
-    const h3Btns = h3St === "running"
-      ? `<button class="sm gray" onclick="h3Cmd('${d.device_id}','stop')">停止</button> <button class="sm gray" onclick="h3Cmd('${d.device_id}','uninstall')">卸载</button>`
-      : h3St === "installed"
-        ? `<button class="sm" onclick="h3Cmd('${d.device_id}','start')">启动</button> <button class="sm gray" onclick="h3Cmd('${d.device_id}','uninstall')">卸载</button>`
-        : h3St === "uninstalled" ? `<button class="sm" onclick="h3Cmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(h3St)}</span>`;
-    const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
-      : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
-    const compLine = badgeLine;
-    const usage = isOn ? usageBars(d.usage || {}) : "";
-    const depPct = deployPct(dep);
-    const depBar = (isOn && dep.state && !["idle","stopped"].includes(dep.state))
-      ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
-    const depType = dep.type || (dep.engine ? "engine" : "");
-    const depComp = depType === "ocr" ? "OCR" : depType === "h3" ? "H3" : depType === "engine" ? `${dep.engine} ${dep.model||""}` : "";
-    const slotLine = depComp
-      ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
-      : `<br><span style="font-size:12px;color:#64748b">当前部署: 无</span>`;
-    const isEngine = depType === "engine";
-    const deployInfo = isOn ? `
-      ${isEngine ? `<span class="state ${dep.state||"idle"}">${dep.state||"idle"}</span>${depBar}` : ""}
-      ${isEngine ? `<br><span style="font-size:12px;color:#94a3b8">${esc(dep.engine||"")} ${esc(dep.model||"")} ${esc(dep.step||"")} ${esc(dep.step_state||"")}<br>${esc(dep.detail||"")}</span>` : ""}
-      ${safeUrl(dep.tunnel_url) ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : ""}${slotLine}` : "";
+    const usage = d.online === true ? usageBars(d.usage || {}) : "";
     const ly = d.layers || {};
     const lyLine = (ly.install || ly.provision || ly.agent)
       ? `<div style="font-size:11px;color:#64748b;margin-top:2px">L1 v${esc((ly.install||{}).version||"—")} · v${esc((ly.provision||{}).version||"—")} · L2 v${esc((ly.agent||{}).version||"—")}${ly.channel ? ` · 通道 ${esc(ly.channel)}` : ""}</div>` : "";
     return [
-      `<span class="dot ${isOn ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
+      `<span class="dot ${d.online === true ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}`,
       `${hw || "-"}${usage}`,
-      `<span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}`,
-      `<div class="row">${cascadeHtml(d, dep, ocrSt, h3St)}
-        <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
-        <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
+      statusCardHtml(d, dep),
+      `<div class="row">${cascadeHtml(d, dep)}
+        <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">隧道</button>
         <button class="sm gray" onclick="toggleDetail('${d.device_id}')">详情</button>
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
+        <button class="sm gray" onclick="recycleDisk('${d.device_id}')">回收</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
-        <button class="sm gray" onclick="recycleDisk('${d.device_id}')" title="手动磁盘滚动回收（LRU，绝不动当前运行部署）">回收磁盘</button>
-        <br><span style="font-size:11px;color:#94a3b8">组件: OCR ${esc(ocrSt)} · H3 ${esc(h3St)}</span>
       </div>`,
     ];
 }
@@ -513,9 +540,9 @@ function renderDevices() {
       const det = document.createElement("tr");
       det.id = "detail_" + d.device_id;
       det.style.display = expandedDevs.has(d.device_id) ? "" : "none";
+      tbody.appendChild(tr);   // 先挂载行 tr，再挂折叠行 det（修复 detail_ 行未挂载→详情/日志点击无效）
       tr.after(det);
       R = rowDom[d.device_id] = { tr, det, fp };
-      tbody.appendChild(tr);
       continue;
     }
     const tds = R.tr.children;
@@ -537,7 +564,13 @@ function renderDevices() {
       cursor = R.tr.nextElementSibling === R.det ? R.det.nextElementSibling : R.tr.nextElementSibling;
     }
   }
-  if (!devices.length && !tbody.querySelector("tr")) tbody.innerHTML = `<tr><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
+  // 空态行：无设备时展示；设备到达后回收
+  const emptyRow = tbody.querySelector("tr.empty-row");
+  if (!devices.length) {
+    if (!emptyRow) tbody.innerHTML = `<tr class="empty-row"><td colspan="4" style="color:#64748b">暂无设备。点右上角「+ 添加设备」获取安装命令。</td></tr>`;
+  } else if (emptyRow) {
+    emptyRow.remove();
+  }
   expandedDevs.forEach(id => fillDetail(id));
 }
 
@@ -609,7 +642,7 @@ function cascadeEngineHtml(st) {
 function cascadeDeployLabel(st) {
   return st.type === "ocr" ? "安装 OCR" : st.type === "h3" ? "安装 H3" : "部署引擎";
 }
-function cascadeHtml(d, dep, ocrSt, h3St) {
+function cascadeHtml(d, dep) {
   // 默认（老记录/未部署兼容）：dep.type → 类型；dep.engine/model → 引擎/模型
   const prev = cascadeSel[d.device_id];
   const st = prev || { type: dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text",
@@ -879,7 +912,7 @@ window.toggleDetail = async (id, opts) => {
   const tr = $("detail_" + id);
   if (!tr) return;
   if (tr.style.display !== "none") {
-    // t78 UI 反馈：折叠不自动收回（轮询/刷新保持），由用户手动关
+    if (opts && opts.tab) { switchTab(id, opts.tab); return; }   // 已展开时的「日志」= 切到日志 tab，不收起
     tr.style.display = "none";
     expandedDevs.delete(id);
     delete tabState[id];   // t90：关闭折叠时清理该设备 tab 记忆，避免残留
