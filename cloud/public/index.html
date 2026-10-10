@@ -709,6 +709,8 @@ window.vidSend = async () => {
   const w = parseInt($("vidW").value) || 480;
   const h = parseInt($("vidH").value) || 280;
   const steps = parseInt($("vidSteps").value) || 20;
+  // t109：计时起点=点击生成（提交 vid_gen 前）——终用时含排队+生成，进度与终值同源
+  const t0 = performance.now();
   addMsg("user", "🎬 " + prompt + `（${w}×${h} · ${frames}帧 · ${steps}步）`);
   const bot = addMsg("bot", "🎞 生成中…（H3 文生视频单次约 20s–13min，请耐心等待）");
   const payload = { prompt, width: w, height: h, video_frames: frames,
@@ -724,7 +726,7 @@ window.vidSend = async () => {
     bot.textContent = "🎞 生成中…（等待结果，可能需数分钟）";
     // 异步作业形态：{id,status} → 轮询 /sdcpp/v1/jobs/{id}
     if (data.id && data.status && data.status !== "completed" && data.status !== "failed") {
-      const jobId = data.id, t0 = performance.now();
+      const jobId = data.id;   // t109：t0 已上移到点击起点，进度/终值同源
       while (true) {
         await new Promise(res => setTimeout(res, 3000));
         const jr = await fetch(turl + "/sdcpp/v1/jobs/" + jobId).catch(() => null);
@@ -738,7 +740,10 @@ window.vidSend = async () => {
     const vid = extractVideo(data);
     if (!vid) throw new Error("未取到视频结果: " + JSON.stringify(data).slice(0, 160));
     bot.innerHTML = videoHtml(vid);
-  } catch (e) { bot.textContent = "错误: " + e.message; }
+    // t109：最终总用时（进度同源 t0；仅成功路径显示，失败不显示伪用时）
+    bot.innerHTML += '<div style="margin-top:8px;font-size:13px;color:#a5b4fc">⏱ 生成用时 ' +
+      ((performance.now() - t0) / 1000).toFixed(1) + 's（含排队+生成，起于点生成）</div>';
+  } catch (e) { bot.textContent = "错误: " + e.message; }   // t109：失败只报错，不显示伪用时
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 function fileToBase64(f) {
