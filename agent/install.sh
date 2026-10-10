@@ -246,8 +246,12 @@ EOF
 if [ -d "$(dirname "$INSTALL_DIR")/deploy/docker" ]; then
     mkdir -p "$INSTALL_DIR/docker-prep"
     cp -r "$(dirname "$INSTALL_DIR")/deploy/docker/." "$INSTALL_DIR/docker-prep/"
+    # t107：引擎 docker-prep（独立目录 deploy/docker-prep/）一并落位（docker-prep.<engine>.sh）
+    if [ -d "$(dirname "$INSTALL_DIR")/deploy/docker-prep" ]; then
+        cp -r "$(dirname "$INSTALL_DIR")/deploy/docker-prep/." "$INSTALL_DIR/docker-prep/"
+    fi
     chmod +x "$INSTALL_DIR"/docker-prep/*.sh
-    echo "[cybercafe] docker-prep 框架已落位（$INSTALL_DIR/docker-prep/docker-prep-base.sh）"
+    echo "[cybercafe] docker-prep 框架已落位（$INSTALL_DIR/docker-prep/docker-prep-base.sh + 引擎脚本）"
 elif [ -d "$INSTALL_DIR/docker-prep" ]; then
     echo "[cybercafe] docker-prep 框架已存在（跳过拷贝）"
 else
