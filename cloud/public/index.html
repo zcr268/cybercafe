@@ -463,6 +463,12 @@ function buildRowCells(d) {
         : h3St === "uninstalled" ? `<button class="sm" onclick="h3Cmd('${d.device_id}','install')">安装</button>` : `<span style="font-size:11px">${esc(h3St)}</span>`;
     const ocrLabel = ocrSt === "installed" ? `OCR 已安装 ${ocr.version || ""}`
       : ocrSt === "installing" ? "OCR 安装中…" : ocrSt === "uninstalling" ? "OCR 卸载中…" : "OCR 未安装";
+    // t108：H3 组件区档位可见——quant（.version 落盘值）→ 档位标签（UD-Q2_K_XL=快档 / Q4_K_M=高清）
+    const h3Quant = h3.quant || "";
+    const h3TierLabel = h3Quant === "Q4_K_M" ? "高清档" : h3Quant === "UD-Q2_K_XL" ? "快档" : "";
+    const h3Label = h3St === "running" ? `H3 运行中 ${h3.version || ""}${h3Quant ? ` · ${h3TierLabel}(${esc(h3Quant)})` : ""}`
+      : h3St === "installed" ? `H3 已安装 ${h3.version || ""}${h3Quant ? ` · ${h3TierLabel}(${esc(h3Quant)})` : ""}`
+      : h3St === "uninstalled" ? "H3 未安装" : `H3 ${esc(h3St)}`;
     const compLine = badgeLine;
     const usage = isOn ? usageBars(d.usage || {}) : "";
     const depPct = deployPct(dep);
@@ -470,8 +476,12 @@ function buildRowCells(d) {
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
     const depType = dep.type || (dep.engine ? "engine" : "");
     const depComp = depType === "ocr" ? "OCR" : depType === "h3" ? "H3" : depType === "engine" ? `${dep.engine} ${dep.model||""}` : "";
+    // t108：H3 档位标注——tier（h3-fast/h3-hd）+ 实际量化（UD-Q2_K_XL=快档 / Q4_K_M=高清）在槽位一眼可见
+    const tierQ = dep.type === "h3"
+      ? `${dep.tier && dep.tier !== "default" ? ` · ${esc(dep.tier)}` : ""}${dep.quant ? ` (${esc(dep.quant)})` : ""}`
+      : "";
     const slotLine = depComp
-      ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
+      ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""}${tierQ} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
       : `<br><span style="font-size:12px;color:#64748b">当前部署: 无</span>`;
     const isEngine = depType === "engine";
     const deployInfo = isOn ? `
@@ -494,7 +504,7 @@ function buildRowCells(d) {
         <button class="sm gray" onclick="viewLog('${d.device_id}')">日志</button>
         <button class="sm red" onclick="delDev('${d.device_id}')">删除</button>
         <button class="sm gray" onclick="recycleDisk('${d.device_id}')" title="手动磁盘滚动回收（LRU，绝不动当前运行部署）">回收磁盘</button>
-        <br><span style="font-size:11px;color:#94a3b8">组件: OCR ${esc(ocrSt)} · H3 ${esc(h3St)}</span>
+        <br><span style="font-size:11px;color:#94a3b8">组件: OCR ${esc(ocrSt)} · H3 ${esc(h3St)}${h3Quant ? ` · ${esc(h3TierLabel)}(${esc(h3Quant)})` : ""}</span>   <!-- t108：组件区档位可见 -->
       </div>`,
     ];
 }
@@ -643,7 +653,7 @@ window.cascadeDeploy = async id => {
   const st = cascadeState(id);
   cascadeSel[id] = st;   // 部署后保持所选（fp 稳定）
   if (st.type === "ocr") { await ocrCmd(id, "install"); return; }
-  if (st.type === "h3") { await h3Cmd(id, "install"); return; }
+  if (st.type === "h3") { await h3Cmd(id, "install", st.option || "h3-fast"); return; }   // t108：档位不丢
   const model = st.option;
   if (!confirm(`在设备 ${id} 上部署 ${st.engine} · ${model}？`)) return;
   try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine: st.engine, model }) });
@@ -765,10 +775,10 @@ window.ocrCmd = async (id, action) => {
         toast("OCR 指令已下发: " + action); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
-window.h3Cmd = async (id, action) => {
+window.h3Cmd = async (id, action, option) => {
   if (action === "uninstall" && !confirm(`在设备 ${id} 上卸载 H3（删除全部权重/编译产物/日志，约 27GB）？`)) return;
-  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "h3", action }) });
-        toast("H3 指令已下发: " + action); viewLog(id); setTimeout(refresh, 1000); }
+  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "h3", action, ...(option ? { option } : {}) }) });
+        toast("H3 指令已下发: " + action + (option ? "（" + option + "）" : "")); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
 window.cmd = async (id, type) => {

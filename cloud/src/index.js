@@ -680,6 +680,9 @@ async function handleAdminCommand(request, env) {
     return json({ error: "ocr action(install|uninstall) required" }, 400);
   if (body.type === "h3" && !["install", "uninstall", "start", "stop"].includes(body.action))
     return json({ error: "h3 action(install|uninstall|start|stop) required" }, 400);
+  // t108：H3 档位——install 可选 option（h3-fast/h3-hd），传给 agent 全链不丢
+  if (body.type === "h3" && body.option !== undefined && !["h3-fast", "h3-hd"].includes(body.option))
+    return json({ error: "h3 option(h3-fast|h3-hd) invalid" }, 400);
   // t97：手动磁盘回收——target_gb 可选（默认 agent 侧 5GB）
   const targetGb = body.target_gb != null ? Number(body.target_gb) : undefined;
   if (body.type === "recycle" && targetGb !== undefined && isNaN(targetGb))
@@ -688,6 +691,7 @@ async function handleAdminCommand(request, env) {
   if (!exists) return json({ error: "device not found" }, 404);
   await env.CYBERCAFE_KV.put(`cmd:${body.device_id}`,
     JSON.stringify({ type: body.type, ...(body.action ? { action: body.action } : {}),
+                     ...(body.option ? { option: body.option } : {}),
                      ...(targetGb !== undefined ? { target_gb: targetGb } : {}),
                      created_at: Math.floor(Date.now() / 1000) }));
   return json({ ok: true });
