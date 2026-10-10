@@ -459,10 +459,12 @@ function targetName(d) {
   const dep = d.deploy || {};
   const ocr = ((d.components || {}).ocr) || {};
   const h3 = ((d.components || {}).h3) || {};
-  const active = s => ["installing", "uninstalling", "installed", "running", "failed"].includes(s);
-  if (dep.type === "ocr" || active(ocr.state)) return "OCR";
-  if (dep.type === "h3" || active(h3.state)) return "H3";
-  if (dep.engine) return dep.engine;
+  const progress = s => ["installing", "uninstalling"].includes(s);   // 仅在途组件操作参与判定
+  if (dep.engine) return dep.engine;                                  // 引擎部署优先（当前部署类型）
+  if (dep.type === "ocr") return "OCR";                               // 组件部署仅在无引擎时才成立
+  if (dep.type === "h3") return "H3";
+  if (progress(ocr.state)) return "OCR";                              // 无引擎部署时的组件在途态
+  if (progress(h3.state)) return "H3";
   return "未部署";
 }
 function oneLiner(d) {
@@ -471,7 +473,7 @@ function oneLiner(d) {
   const parts = [];
   if (dep.version) parts.push("v" + dep.version);
   if (dep.detail) parts.push(dep.detail);
-  if (targetName(d) === "H3" || dep.type === "h3") {
+  if (targetName(d) === "H3") {
     // H3 档位标注（t108/t111 移植）：dep.quant/tier 优先，旧部署用 components.h3.quant 兜底推导
     const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
     const t = (dep.tier && dep.tier !== "default") ? dep.tier
@@ -598,9 +600,9 @@ function renderDevices() {
 // 缺失致 renderChatDevs 抛 ReferenceError，聊天下拉空、OCR/H3 聊天形态全断。此处恢复。
 function chatLabel(d) {
   const dep = d.deploy || {};
-  if (dep.type === "ocr") return "OCR " + (dep.version || "");
-  if (dep.type === "h3") return "H3 " + (dep.version || "");
-  return (dep.engine || "") + " " + (dep.model || "");
+  const t = targetName(d);
+  if (t === "OCR" || t === "H3") return t + " " + (dep.version || "");
+  return t + (dep.model ? " " + dep.model : "");
 }
 // t98-EGO 复检抓回（二）：t96 重写 renderDevices 的 span 替换同时误删 chatLabel 与
 // updateChatMode（两者均位于 renderDevices→renderChatDevs 之间的原文件区段）。
@@ -613,8 +615,9 @@ function updateChatMode(d) {
     chatCurDev = did;
     if (did) chatRender(did); else $("chatbox").innerHTML = "";
   }
-  const isOcr = !!(dep && dep.type === "ocr");
-  const isVid = !!(dep && dep.type === "h3");
+  const isEngine = !!(dep && dep.engine);   // 引擎部署优先：组件形态仅当无 engine 且 dep.type 明确时生效
+  const isOcr = !!(dep && !isEngine && dep.type === "ocr");
+  const isVid = !!(dep && !isEngine && dep.type === "h3");
   $("ocrIn").style.display = isOcr ? "" : "none";
   $("vidIn").style.display = isVid ? "" : "none";
   $("chatIn").style.display = (isOcr || isVid) ? "none" : "";
@@ -643,7 +646,7 @@ function cascadeState(id) {
   const dep = (devices.find(d => d.device_id === id) || {}).deploy || {};
   const t = $("t_" + id), e = $("e_" + id), o = $("o_" + id);
   const st = {
-    type: t ? t.value : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text"),
+    type: t ? t.value : (dep.engine ? "text" : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text")),
     engine: e ? e.value : (dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama"),
     option: o ? o.value : "",
   };
@@ -669,9 +672,9 @@ function cascadeDeployLabel(st) {
   return st.type === "ocr" ? "安装 OCR" : st.type === "h3" ? "安装 H3" : "部署引擎";
 }
 function cascadeHtml(d, dep) {
-  // 默认（老记录/未部署兼容）：dep.type → 类型；dep.engine/model → 引擎/模型
+  // 默认（老记录/未部署兼容）：dep.type 与 dep.engine 冲突时以 dep.engine 为准（当前部署类型）
   const prev = cascadeSel[d.device_id];
-  const st = prev || { type: dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text",
+  const st = prev || { type: dep.engine ? "text" : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text"),
                        engine: dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama",
                        option: dep.model || "" };
   return `<select id="t_${d.device_id}" onchange="cascadeChanged('${d.device_id}','type')" style="max-width:88px">
