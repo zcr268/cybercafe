@@ -3,8 +3,8 @@
 「云端管 + 本地跑」的远程模型部署管控系统，三部分组成：
 ```
 ┌──────────────────────────────┐
-│ ① 云管理端 cloud/             │   Cloudflare Worker + KV + 静态UI
-│   设备列表 / 下发部署指令 /     │   （本仓库直接部署，支持绑定固定域名）
+│ ① 云管理端 cloud/             │   真实 HTTP 服务（node server.js）
+│   设备列表 / 下发部署指令 /     │   + 本地文件 KV（DATA_DIR/kv.json）
 │   聊天 UI 经 CF 隧道直连机器    │
 └──────▲────────────────▲──────┘
        │ 拉取脚本/指令      │ 聊天流量(带 Key)
@@ -20,23 +20,34 @@
 
 | 路径 | 说明 |
 |---|---|
-| `cloud/` | ① 云管理端：CF Worker（`src/index.js`）+ 管理/聊天 UI（`public/index.html`） |
+| `cloud/` | ① 云管理端：真实独立 HTTP 服务（`server.js` 入口 + `src/index.js` fetch 处理器）+ 管理/聊天 UI（`public/index.html`） |
 | `agent/` | ②③ 本地脚本：`install.sh`（安装/自更新/开机自启）+ `cybercafe-agent.py`（控制脚本，仅依赖 Python3 标准库） |
 
-## 部署云管理端（Cloudflare）
+## 部署云管理端
 
-前置：Cloudflare 账号。KV 命名空间必须在账号内创建一次：
+W0 服务化后云管理端为**真实独立 HTTP 服务**，不再依赖 wrangler dev / CF Workers 平台绑定：
+`node cloud/server.js` 自托管静态 UI 与全部 API，KV 状态持久化到本地文件 `DATA_DIR/kv.json`
+（重启同 DATA_DIR 数据不丢）；`cloud/wrangler.toml` 仅保留 fetch 处理器兼容参考，不作为运行形态。
+
+**本地沙箱**（开发/验收，127.0.0.1:8788）：
 
 ```bash
 cd cloud
-npx wrangler kv namespace create CYBERCAFE_KV   # 记下返回的 id
-# 把 id 填入 wrangler.toml 的 [[kv_namespaces]] id 字段
-npx wrangler secret put ADMIN_TOKEN              # 设置管理端登录口令
-npx wrangler deploy                              # 或在 CF 后台用 Workers Builds 连接本 GitHub 仓库自动部署
+ADMIN_TOKEN=dev-admin-token-8848 node server.js   # 默认 PORT=8788；DATA_DIR 缺省为系统临时目录
 ```
 
-- 后续可在 CF 后台给 Worker 绑定**固定自定义域名**——代码全部使用请求来源地址下发配置，绑域名后零改动。
-- `workers.dev` 默认域名在中国大陆可能不可达，生产使用请绑自有域名。
+**生产（aliyun 容器）**：`deploy/aliyun/` 镜像 0.4.0——Dockerfile 构建后 entrypoint 直启
+`node server.js`，compose 注入 `PORT=8080`、`DATA_DIR=/data`（`cybercafe-state` 卷持久化 kv.json）、
+`ADMIN_TOKEN`，cloudflared 隧道（`CF_TUNNEL_TOKEN`）把 `127.0.0.1:8080` 出公网到固定域名：
+
+```bash
+cd deploy/aliyun
+ADMIN_TOKEN=<口令> CF_TUNNEL_TOKEN=<隧道token> docker compose up -d --build
+```
+
+- 环境变量契约（本地与生产同名读取，详见 `cloud/server.js` 头注释与 `cloud/tests/w0-service/README.md`）：
+  `PORT`、`ADMIN_TOKEN`、`DATA_DIR`、`GITHUB_RAW_BASE` / `JSDELIVR_RAW_BASE`、`AGENT_LOCAL_BASE` / `AGENT_LOCAL_ROOT_BASE`。
+- 代码全部使用请求来源地址下发配置，绑固定域名后零改动；生产固定域名 `cybercafe.akkak.kdns.fr`。
 
 ## 使用流程
 
@@ -138,7 +149,7 @@ npx wrangler deploy                              # 或在 CF 后台用 Workers B
 
 ## 安全模型
 
-- 云管理端：`ADMIN_TOKEN`（CF secret）保护全部管理 API 与 UI
+- 云管理端：`ADMIN_TOKEN`（环境变量注入：本地沙箱启动参数 / 生产 compose，见「部署云管理端」）保护全部管理 API 与 UI
 - 设备侧：每台设备一个 `cck-` 设备密钥，安装时由云端注入脚本本地保存；注册/心跳/拉脚本均校验
 - 模型 API：每次部署由云端生成独立 `sk-` Key，nginx 网关强制 Bearer 鉴权 + CORS，Key 只保存在云管 KV 与机器本地配置中
 
@@ -183,14 +194,14 @@ chmod +x /root/uninstall-all.sh
 
 云管理端下发 `install.sh` / `cybercafe-agent.py` 走三通道（见 `cloud/src/index.js`「脚本/文件分发通道」）：
 
-1. **`AGENT_LOCAL_BASE`（首选，aliyun 生产用）**：compose 把仓库 `agent/` 只读挂载进静态资源目录 `cloud/public/_agent`，worker 经 loopback HTTP 取自身静态资源——`git pull` 后**即时生效**（dev server 每请求读盘），不受任何 CDN 缓存影响，零外部依赖；
+1. **`AGENT_LOCAL_BASE`（首选，aliyun 生产用）**：compose 把仓库 `agent/` 只读挂载进静态资源目录 `cloud/public/_agent`，服务经 loopback HTTP 取自身静态资源——`git pull` 后**即时生效**（server.js 每请求读盘），不受任何 CDN 缓存影响，零外部依赖；
 2. **`GITHUB_RAW_BASE`（主网络通道，默认 raw.githubusercontent.com）**：Fastly 边缘缓存 ≤5min，新版本最快分钟级生效；
 3. **jsDelivr（内置自动回退）**：aliyun 出口访问 raw 超时/任何环境主通道失败时自动兜底；`@main` 路径缓存 12h，时效最差，仅作韧性保障。
 
 要点：
 - **实测结论**：jsDelivr 与 raw.githubusercontent 都忽略 URL query 参与缓存键（已实测验证 `?t=` 破缓存无效），旧代码的 60s 窗口 query bust 已移除，改为「自适应双通道 + 5s 超时自动回退 + 本地挂载」。
-- **默认值即生产可用**：`DEFAULT_RAW_BASE` 未改变的部署环境即使漏注入 `GITHUB_RAW_BASE`，raw 不通时自动回退 jsDelivr，不会复现 aliyun 出口超时故障；aliyun 容器配置见 `deploy/aliyun/docker-compose.yml`（挂载 `../../agent:/app/cloud/public/_agent:ro` + `AGENT_LOCAL_BASE=http://127.0.0.1:8080/_agent`，相对路径以 compose 文件目录 `deploy/aliyun/` 为基准）。实测结论：本运行时 workerd 沙箱拒绝 `node:fs` 磁盘读、`env.ASSETS` 未注入，worker loopback 取静态资源是唯一可靠本地通道。
-- 新环境部署建议：CF Workers 用默认 raw 即可；容器类部署仿照 aliyun 挂载 `agent/` 到 `public/_agent` 并设置 `AGENT_LOCAL_BASE`。
+- **默认值即生产可用**：`DEFAULT_RAW_BASE` 未改变的部署环境即使漏注入 `GITHUB_RAW_BASE`，raw 不通时自动回退 jsDelivr，不会复现 aliyun 出口超时故障；aliyun 容器配置见 `deploy/aliyun/docker-compose.yml`（挂载 `../../agent:/app/cloud/public/_agent:ro` + `AGENT_LOCAL_BASE=http://127.0.0.1:8080/_agent`，根级文件另挂 `../../:/app/cloud/public/_repo:ro` + `AGENT_LOCAL_ROOT_BASE=http://127.0.0.1:8080/_repo`，相对路径以 compose 文件目录 `deploy/aliyun/` 为基准）。W0 服务化后（node server.js）静态 UI 由服务直接读盘提供，本地挂载通道不再受 worker 运行时限制。
+- 新环境部署建议：容器类部署仿照 `deploy/aliyun/docker-compose.yml` 挂载 `agent/` 到 `public/_agent`（根级文件挂 `_repo`）并设置 `AGENT_LOCAL_BASE` / `AGENT_LOCAL_ROOT_BASE`；未配置本地挂载时走默认 raw/jsDelivr 网络通道即可。
 
 ## 注意
 
@@ -199,7 +210,7 @@ chmod +x /root/uninstall-all.sh
 
 ## 项目工作规矩（用户 2026-09-29 明确，每次开发必须执行）
 
-1. **本地 = 长期快速调试开发沙箱**：本机 wrangler dev（127.0.0.1:8788，ADMIN_TOKEN=dev-admin-token-8848）与临时隧道（trycloudflare.com）是**永久保留的快速调试/开发环境，不存在「下线」操作**——生产云管（aliyun）负责正式链路，本地沙箱负责开发与验收并行推进（云管理端开发、引擎支持开发、后续一切开发），两边同时跑、互不替代。
+1. **本地 = 长期快速调试开发沙箱**：本机 `node cloud/server.js`（127.0.0.1:8788，ADMIN_TOKEN=dev-admin-token-8848，KV 落盘 `DATA_DIR/kv.json`）与临时隧道（trycloudflare.com）是**永久保留的快速调试/开发环境，不存在「下线」操作**——生产云管（aliyun）负责正式链路，本地沙箱负责开发与验收并行推进（云管理端开发、引擎支持开发、后续一切开发），两边同时跑、互不替代。
    - **域名约定**：本地验证域名**一直使用临时隧道域名**（trycloudflare.com 快速隧道，每次隧道重建会变成新随机域名，agent 心跳自动上报最新地址）；固定域名 `cybercafe.akkak.kdns.fr` **仅生产（aliyun）使用**。
 2. **最终收敛**：每轮改动的最终产物必须收敛到 **GitHub 仓库（zcr268/cybercafe）** 与 **aliyun**（`ssh aliyun`，`~/work/cybercafe`，deploy/aliyun 可部署形态）。本地修改推回前先 `git pull --rebase` 防冲突，并同步部署到 aliyun。
 3. **真实路径红线**：开发与验收的端到端验证必须走真实路径（真实机器 / 真实容器 / 真实网络传输），禁止 mock 冒充。
