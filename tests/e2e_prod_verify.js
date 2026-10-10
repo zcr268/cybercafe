@@ -258,8 +258,8 @@ const results = [];
     })()`);
     const eqArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
     cs.push(['级联初始(text): 主按钮=部署引擎', casc.initial.btn === '部署引擎' && casc.initial.e.length >= 1 && casc.initial.o.length >= 1, JSON.stringify(casc.initial)]);
-    cs.push(['切图生文: 引擎=[OCR]/含rapidocr/主按钮=安装 OCR', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '安装 OCR', JSON.stringify(casc.ocr)]);
-    cs.push(['切文生视频: 引擎=[H3]/含h3档/主按钮=安装 H3', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '安装 H3', JSON.stringify(casc.h3)]);
+    cs.push(['切图生文: 引擎=[OCR]/含rapidocr/主按钮恒=部署引擎', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '部署引擎', JSON.stringify(casc.ocr)]);
+    cs.push(['切文生视频: 引擎=[H3]/含h3档/主按钮恒=部署引擎', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '部署引擎', JSON.stringify(casc.h3)]);
     cs.push(['切回文生文: 主按钮=部署引擎', casc.text.btn === '部署引擎' && casc.text.e.length >= 1, JSON.stringify(casc.text)]);
     actions.push('生产级联联动 类型→引擎→档位→主按钮文案 期望值比对');
   }
