@@ -910,6 +910,9 @@ _h3_marker = "/opt/minimax-h3/.version"
 _H3_DIR = "/opt/minimax-h3"           # 安装目标（权重/编译产物/日志；模块级常量便于沙箱覆盖）
 _H3_SRC_DIR = "/opt/cybercafe-h3-src" # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
 _H3_ACTIONS = ("install", "uninstall", "start", "stop", "status")
+# t108：UI 档位（三列级联 h3-fast/h3-hd）→ 实际量化（已验证 GGUF 集；快档=最速默认档，
+# 高清=16GB 卡最优已验证档 Q4_K_M；q8 无已验证产物不引入——如实标注）
+_H3_TIERS = {"h3-fast": "UD-Q2_K_XL", "h3-hd": "Q4_K_M"}
 
 def _h3_state():
     """components.h3：读本机 H3 安装状态标记（install.sh 子命令/主流程写 .version）。"""
@@ -929,11 +932,15 @@ def _fetch_h3(script_name, out_path, mode=0o755):
     _atomic_write(out_path, src, mode)
     return src
 
-def run_h3(action):
+def run_h3(action, option=None):
     """H3 安装/卸载/启停：云端拉取 minimax-h3 脚本 → 校验 → 执行 → .version 状态回传。
+    option（t108）：h3-fast/h3-hd 档位 → H3_QUANT env 传入 install.sh（缺省=None=默认档并如实标注）。
     install/uninstall 走主流程；start/stop/status 走 install.sh 子命令。
     与 L3/OCR 同纪律：拉不到/校验不过/执行失败 → 如实 fail，绝不静默成功。"""
     import json as _json
+    if option is not None and option not in _H3_TIERS:
+        log("run_h3: option 非法（%s），按默认档处理并如实标注" % option)
+        option = None                      # t108 防御：档位于此归一化，deploy 槽 tier 不漂移
     h3_dir = _H3_DIR
     src_dir = _H3_SRC_DIR                  # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
     os.makedirs(src_dir, exist_ok=True)
@@ -947,7 +954,11 @@ def run_h3(action):
         # 用 PIPE 捕获会因服务存活导致 run() 挂到超时（与 OCR 同陷阱，t71 已修）
         logp = h3_dir + "/h3-install.log"
         os.makedirs(h3_dir, exist_ok=True)
-        rc, out = run("bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=1800)
+        # t108：档位→量化——H3_QUANT env 注入（install.sh 已支持；.version 落 quant 供心跳/UI）
+        qenv = ("H3_QUANT=%s " % _H3_TIERS[option]) if (option and option in _H3_TIERS) else ""
+        if not qenv:
+            log("H3 档位缺省（未选/非法），使用 install.sh 默认档并如实标注 tier=default")
+        rc, out = run(qenv + "bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=1800)
         if rc != 0:
             try:
                 tail = open(logp).read()[-300:]
@@ -961,7 +972,9 @@ def run_h3(action):
         # t78：H3 安装后若已在运行 → 建机器隧道（11435 OpenAI 兼容）暴露
         url = _start_component_tunnel(11435) if st.get("state") == "running" else None
         _set_component_deploy({"type": "h3", "state": st.get("state", "installed"),
-                               "version": st.get("version"), "tunnel_url": url,
+                               "version": st.get("version"),
+                               "quant": st.get("quant") or (_H3_TIERS.get(option) if option else None),
+                               "tier": option or "default", "tunnel_url": url,
                                "ts": int(time.time())})
         report_progress("h3", "ok", "H3 安装完成（" + str(st.get("state", "?")) + "）")
         return 0
@@ -995,7 +1008,9 @@ def run_h3(action):
             # t78：H3 启动后建机器隧道（11435 OpenAI 兼容 /v1/models，可直接聊天）
             url = _start_component_tunnel(11435)
             _set_component_deploy({"type": "h3", "state": "running",
-                                   "version": st.get("version"), "tunnel_url": url,
+                                   "version": st.get("version"),
+                                   "quant": st.get("quant"), "tier": "default",
+                                   "tunnel_url": url,
                                    "ts": int(time.time())})
         elif action == "stop":
             _stop_tunnel()
@@ -1263,10 +1278,14 @@ def handle_command(cmd):
             action = cmd.get("action", "install")
             if action not in _H3_ACTIONS:
                 raise RuntimeError("未知 H3 action: %s" % action)
+            option = cmd.get("option")              # t108：档位全链传递（h3-fast/h3-hd）
+            if option is not None and option not in _H3_TIERS:
+                log("H3 指令 option 非法（%s），按默认档处理" % option)
+                option = None
             if action in ("install", "start"):
                 _stop_other_deployments("h3")       # t78 唯一部署互斥：H3 安装/启动前停引擎/OCR
-            report_progress("h3", "running", "H3 指令: %s" % action)
-            rc = run_h3(action)
+            report_progress("h3", "running", "H3 指令: %s%s" % (action, ("（" + option + "）") if option else ""))
+            rc = run_h3(action, option)
             if rc != 0:
                 report_progress("h3", "fail", "H3 %s 失败（rc=%d）" % (action, rc))
                 # t85 F2：失败后唯一部署槽显示本次失败目标（type=h3 + failed，version 清空）
