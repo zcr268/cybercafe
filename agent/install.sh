@@ -242,6 +242,18 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 EOF
 
+# ---------- 3.5) docker-prep 框架落位（t104：A 脚本 base+模板+资产，供 L1 预装/L3 兜底） ----------
+if [ -d "$(dirname "$INSTALL_DIR")/deploy/docker" ]; then
+    mkdir -p "$INSTALL_DIR/docker-prep"
+    cp -r "$(dirname "$INSTALL_DIR")/deploy/docker/." "$INSTALL_DIR/docker-prep/"
+    chmod +x "$INSTALL_DIR"/docker-prep/*.sh
+    echo "[cybercafe] docker-prep 框架已落位（$INSTALL_DIR/docker-prep/docker-prep-base.sh）"
+elif [ -d "$INSTALL_DIR/docker-prep" ]; then
+    echo "[cybercafe] docker-prep 框架已存在（跳过拷贝）"
+else
+    echo "[cybercafe] ⚠️ 未找到 deploy/docker 目录（docker-prep 框架不落位；不影响 agent 主流程）" >&2
+fi
+
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}.service
 # 克隆自愈场景（provision.sh 内调用本脚本，CYBERCAFE_FROM_PROVISION=1）时 provision 单元正在运行，
