@@ -476,10 +476,16 @@ function buildRowCells(d) {
       ? barHtml(depPct + "%", depPct, dep.state === "failed" ? "crit" : dep.state === "online" ? "okgreen" : "blue") : "";
     const depType = dep.type || (dep.engine ? "engine" : "");
     const depComp = depType === "ocr" ? "OCR" : depType === "h3" ? "H3" : depType === "engine" ? `${dep.engine} ${dep.model||""}` : "";
-    // t108：H3 档位标注——tier（h3-fast/h3-hd）+ 实际量化（UD-Q2_K_XL=快档 / Q4_K_M=高清）在槽位一眼可见
-    const tierQ = dep.type === "h3"
-      ? `${dep.tier && dep.tier !== "default" ? ` · ${esc(dep.tier)}` : ""}${dep.quant ? ` (${esc(dep.quant)})` : ""}`
-      : "";
+    // t108/t111：H3 档位标注——deploy.quant/tier 优先（新部署准确）；
+    // 旧部署（agent 0.7.1 前无 tier/quant）→ components.h3.quant 兜底推导档位（UD-Q2_K_XL=快档/h3-fast，Q4_K_M=高清/h3-hd）
+    let tierQ = "";
+    if (dep.type === "h3") {
+      const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
+      const t = (dep.tier && dep.tier !== "default") ? dep.tier
+        : (q === "Q4_K_M" ? "h3-hd" : q === "UD-Q2_K_XL" ? "h3-fast" : "");
+      if (t) tierQ += ` · ${esc(t)}`;
+      if (q) tierQ += ` (${esc(q)})`;
+    }
     const slotLine = depComp
       ? `<br><span style="font-size:12px"><b>当前部署</b>: ${esc(depComp)}${dep.version ? ` v${esc(dep.version)}` : ""}${tierQ} · <span class="state ${dep.state||"idle"}">${esc(dep.state||"idle")}</span></span>`
       : `<br><span style="font-size:12px;color:#64748b">当前部署: 无</span>`;
