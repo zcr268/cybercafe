@@ -1,0 +1,14 @@
+{
+  "name": "cybercafe-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CyberCafe 云管理端真实独立 HTTP 服务（W0 服务化：静态 UI + 全部 API 自托管，KV 本地文件持久化）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

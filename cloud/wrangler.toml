@@ -1,21 +1,15 @@
+# CyberCafe 云管理端 · 运行形态说明（W0 服务化后）
+# 真实运行形态：node server.js（真实独立 HTTP 服务，静态 UI + 全部 API 自托管，
+# KV 持久化到 DATA_DIR/kv.json 本地文件）。本文件仅保留 fetch 处理器兼容参考，
+# 不再作为运行形态——wrangler dev / CF 平台绑定（assets、KV 命名空间）已移除。
 name = "cybercafe"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# 管理 UI 静态资源（/ 及非 /api 路径）
-[assets]
-directory = "./public"
-
-# KV 命名空间：在 Cloudflare 控制台创建后把真实 id 填到这里
-#   wrangler kv namespace create CYBERCAFE_KV
-[[kv_namespaces]]
-binding = "CYBERCAFE_KV"
-id = "__KV_NAMESPACE_ID__"
-
-# 非敏感配置；ADMIN_TOKEN 请用 secret 设置：
-#   wrangler secret put ADMIN_TOKEN
-# GITHUB_RAW_BASE：脚本分发主通道（默认 raw.githubusercontent；aliyun 容器按需注入 jsDelivr）。
-# 代码内置 jsDelivr 自动回退 + 可选 AGENT_LOCAL_BASE（本地静态资源通道，aliyun 挂载仓库 agent/ → public/_agent），
-# 详见 src/index.js 顶部「脚本/文件分发通道」说明。
+# 非敏感配置；ADMIN_TOKEN 由环境注入（本地沙箱 ADMIN_TOKEN=dev-admin-token-8848，
+# 生产容器 compose 注入）。GITHUB_RAW_BASE：脚本分发主通道（默认 raw.githubusercontent；
+# aliyun 容器按需注入 jsDelivr）。代码内置 jsDelivr 自动回退 + 可选 AGENT_LOCAL_BASE
+# （本地静态资源通道，aliyun 挂载仓库 agent/ → public/_agent），详见 src/index.js
+# 顶部「脚本/文件分发通道」说明。
 [vars]
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/zcr268/cybercafe/main/agent"

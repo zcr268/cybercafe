@@ -1,8 +1,8 @@
-// CyberCafe 云管理端 (Cloudflare Worker)
+// CyberCafe 云管理端 (Worker fetch 处理器；真实独立 HTTP 服务由 server.js 驱动)
 // - 设备注册/心跳/进度上报（X-Device-Key 鉴权）
 // - 管理 API（Bearer ADMIN_TOKEN 鉴权）
 // - 安装脚本/控制脚本实时下发（从 GitHub 仓库 agent/ 拉取并注入参数）
-// - 静态管理 UI（assets）
+// - 静态管理 UI（public/ 本地文件服务，server.js 注入 STATIC_HANDLER）
 
 // 脚本/文件分发通道（2026-09-29 加固）：
 // - 主通道 raw.githubusercontent.com：Fastly 边缘 TTL 5min；实测 query 不参与缓存键，
@@ -863,9 +863,9 @@ export default {
         return json({ error: "not found" }, 404);
       }
 
-      // 其余走静态资源（管理 UI）
-      if (env.ASSETS) return await env.ASSETS.fetch(request);
-      return new Response("cybercafe cloud (no assets bound)", { status: 200 });
+      // 其余走静态资源（管理 UI）：真实服务形态由 server.js 注入的 public/ 本地文件服务提供
+      if (env.STATIC_HANDLER) return await env.STATIC_HANDLER(request, url);
+      return new Response("cybercafe cloud (no static handler bound)", { status: 200 });
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }
