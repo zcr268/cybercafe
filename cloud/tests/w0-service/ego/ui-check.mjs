@@ -21,25 +21,38 @@ out.actions.push("open " + base + "/");
 await openOrReuseTab(base + "/", { wait: true, timeout: 20 });
 await wait(2);
 
-// 等待登录面板出现（无 token 时默认显示 #login）
-let loginVisible = false;
+// 初始态三态判定（w2r 审查 w2-t-3：不得假设未登录态）：
+//   A) #app 已可见（浏览器带 cc_admin_token 登录态）→ 跳过登录直接验证；
+//   B) #login 可见（未登录）→ 填 ADMIN_TOKEN 真实登录；
+//   C) 两者都不可见（页面未渲染/网络失败）→ FAIL。
+let state = { appVisible: false, loginVisible: false };
 for (let i = 0; i < 10; i++) {
-  loginVisible = await js(`(() => { const el = document.querySelector('#login'); return !!el && getComputedStyle(el).display !== 'none' })()`);
-  if (loginVisible) break;
+  state = await js(`(() => {
+    const app = document.querySelector('#app');
+    const login = document.querySelector('#login');
+    return {
+      appVisible: !!app && getComputedStyle(app).display !== 'none',
+      loginVisible: !!login && getComputedStyle(login).display !== 'none'
+    };
+  })()`);
+  if (state.appVisible || state.loginVisible) break;
   await wait(1);
 }
-out.actions.push("login panel visible: " + loginVisible);
-if (!loginVisible) {
-  out.conclusion = "FAIL: login panel not visible";
+out.actions.push("initial state: appVisible=" + state.appVisible + " loginVisible=" + state.loginVisible);
+
+if (state.appVisible) {
+  out.actions.push("已登录态（#app 直显），跳过登录步骤");
+} else if (state.loginVisible) {
+  await fillInput("#tokenIn", token);
+  out.actions.push("fill ADMIN_TOKEN into #tokenIn");
+  await click("#btnLogin");
+  out.actions.push("click #btnLogin");
+} else {
+  out.conclusion = "FAIL: neither #app nor #login visible (page not rendered)";
   cliLog(JSON.stringify(out));
   await completeTaskSpace("w0-service-ui", { keep: false });
   process.exit(1);
 }
-
-await fillInput("#tokenIn", token);
-out.actions.push("fill ADMIN_TOKEN into #tokenIn");
-await click("#btnLogin");
-out.actions.push("click #btnLogin");
 
 // 等待管理台渲染（#app 显示 + 设备/批次表存在）
 let appVisible = false;

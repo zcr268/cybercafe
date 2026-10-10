@@ -23,9 +23,11 @@
 ./run.sh --mode baseline --attach --base-url http://127.0.0.1:8788
 
 # 新服务形态全量验收（生命周期 + 持久化重启 + 形态门禁）
-# 注：SERVICE_CMD 的工作目录是 cloud/tests/w0-service/，server.js 位于其 ../../ 处；
-#     端口经 --port（默认 8788）导出给服务进程，与沙箱/容器端口冲突时改用空闲端口。
-./run.sh --mode service --cmd "node ../../server.js" --port 8788 --data-dir /tmp/w0-kv
+# SERVICE_CMD 必须以**绝对路径**给出（w2r 审查 w2-t-1：start.sh 的 cwd 是 cloud/tests/w0-service/，
+# 相对路径会随 cwd 解析错位导致 Cannot find module）。从套件目录自适应展开 cloud/ 绝对路径：
+#   CLOUD_DIR="$(cd "$(dirname "$0")/../.." && pwd)"   # 在套件目录执行时 = <仓库根>/cloud
+# 端口经 --port（默认 8788）导出给服务进程，与沙箱/容器端口冲突时改用空闲端口。
+./run.sh --mode service --cmd "node $(cd "$(dirname "$0")/../.." && pwd)/server.js" --port 8788 --data-dir /tmp/w0-kv
 
 # 新服务形态 attach（对已运行端点做契约冒烟）
 ./run.sh --mode service --attach --base-url http://127.0.0.1:8080
