@@ -25,10 +25,22 @@ cd /tmp/界面统一/部署状态操作列统一
 ego-browser nodejs < tests/w1_baseline_record.js
 # 2) 验收断言（当前基线跑=红，预期多例失败；t2 实现后应全绿）
 ego-browser nodejs < tests/w1_acceptance.js
+# 3) 混合形态与聊天形态盲区用例（t27；引擎+组件共存不被劫持 + 聊天三形态防回归）
+ego-browser nodejs < tests/w1_hybrid.js
 ```
 
 - 截图：`tests/screenshots/<name>-<时间戳>.png`（每次运行唯一、不互相覆盖）。
 - 每个脚本最后输出 JSON：`{ url, 操作序列, 截图, results, 被测路径, 结论 }`
+
+### w1_hybrid.js（混合形态 + 聊天形态，t27 补盲区）
+生产实测发现「引擎+组件共存」形态（deploy 槽被 agent 写入 type:'h3'/'ocr' + detail/quant/tier，云端深度合并保留 engine），
+W1 前端曾以 dep.type 全面劫持状态卡/级联默认/聊天形态。本用例种子 3 台混合设备（vllm+h3 残留、ollama+h3 残留、ollama+ocr 残留）
++ 2 台纯组件设备（OCR/H3），断言：
+- H1 混合形态状态卡：名称徽章=引擎·模型（非 OCR/H3）、状态徽章=运行中、进度存在、一句话不含 h3 档位（h3-hd/h3-fast/Q4_K_M）；
+- H2 混合形态操作列默认=文生文→引擎→模型→部署引擎（级联不被劫持）；
+- C1 聊天形态：混合=chatLabel 引擎+模型（非 'H3 0.1.0'）+ chatMeta「文本聊天」+文本输入框显示；纯 H3/OCR=视频/图片形态（防回归）。
+种子说明：混合设备 deploy 补 `state:'online'`（cardState 不推导组件态，状态徽章=运行中所需）与 tunnel_url（聊天下拉要求在线+隧道）。
+hostname 前缀 `w1h-`，结束 DELETE 清理。
 
 ### 截图不入库的理由（F3）
 `tests/.gitignore` 排除 `screenshots/`：截图为**每次运行可再生**的运行产物（文件名带时间戳，
