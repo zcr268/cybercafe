@@ -273,8 +273,8 @@ const interaction = {};
     interaction.cascade = casc;
     const eqArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
     cs.push(['F1 级联初始(text): 引擎多选≥1/档位≥1/主按钮=部署引擎', casc.initial.btn === '部署引擎' && casc.initial.e.length >= 1 && casc.initial.o.length >= 1, JSON.stringify(casc.initial)]);
-    cs.push(['F1 切图生文(ocr): 引擎=[OCR]/档位含rapidocr/主按钮=安装 OCR', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '安装 OCR', JSON.stringify(casc.ocr)]);
-    cs.push(['F1 切文生视频(h3): 引擎=[H3]/档位含h3档/主按钮=安装 H3', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '安装 H3', JSON.stringify(casc.h3)]);
+    cs.push(['F1 切图生文(ocr): 引擎=[OCR]/档位含rapidocr/主按钮恒=部署引擎', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '部署引擎', JSON.stringify(casc.ocr)]);
+    cs.push(['F1 切文生视频(h3): 引擎=[H3]/档位含h3档/主按钮恒=部署引擎', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '部署引擎', JSON.stringify(casc.h3)]);
     cs.push(['F1 切回文生文(text): 主按钮=部署引擎/引擎恢复多选', casc.text.btn === '部署引擎' && casc.text.e.length >= 1 && casc.text.o.length >= 1, JSON.stringify(casc.text)]);
     actions.push('F1 级联联动：类型 文生文→图生文→文生视频→文生文，期望值比对 ' + ['initial', 'ocr', 'h3', 'text'].every(k => {
       const c = casc[k]; return c && c.btn; }) ? '已比对' : '异常');
@@ -347,7 +347,7 @@ const interaction = {};
     interaction.fold = fold;
   }
 
-  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮随类型 + 通用组 隧道→详情→日志→回收→删除）+ F1 联动断言 + F5 可点性断言',
+  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮恒「部署引擎」（t31 统一文案） + 通用组 隧道→详情→日志→回收→删除）+ F1 联动断言 + F5 可点性断言',
     pass: cs.every(c => c[1]), checks: cs });
 }
 
