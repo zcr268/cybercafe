@@ -66,6 +66,8 @@ const badgesOf = el => el.filter(e => !e.btn && !e.link && e.bg && e.bg !== 'rgb
 const task = await useOrCreateTaskSpace('E2-生产e2e界面验收');
 await openOrReuseTab(BASE + '/', { wait: true, timeout: 40 });
 actions.push('打开生产域名 ' + BASE);
+// 视口固定（t30 环境发现：ego 窗口偶发 0×0 视口 → 截图/CDP 坐标点击失效），一次到位防复现
+try { await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }); actions.push('固定视口 1440×900'); } catch (e) { actions.push('视口固定失败（尽力而为）：' + String(e && e.message || e)); }
 await wait(2);
 await shot('e2e-01-load');
 
@@ -256,8 +258,8 @@ const results = [];
     })()`);
     const eqArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
     cs.push(['级联初始(text): 主按钮=部署引擎', casc.initial.btn === '部署引擎' && casc.initial.e.length >= 1 && casc.initial.o.length >= 1, JSON.stringify(casc.initial)]);
-    cs.push(['切图生文: 引擎=[OCR]/含rapidocr/主按钮=安装 OCR', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '安装 OCR', JSON.stringify(casc.ocr)]);
-    cs.push(['切文生视频: 引擎=[H3]/含h3档/主按钮=安装 H3', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '安装 H3', JSON.stringify(casc.h3)]);
+    cs.push(['切图生文: 引擎=[OCR]/含rapidocr/主按钮恒=部署引擎', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '部署引擎', JSON.stringify(casc.ocr)]);
+    cs.push(['切文生视频: 引擎=[H3]/含h3档/主按钮恒=部署引擎', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '部署引擎', JSON.stringify(casc.h3)]);
     cs.push(['切回文生文: 主按钮=部署引擎', casc.text.btn === '部署引擎' && casc.text.e.length >= 1, JSON.stringify(casc.text)]);
     actions.push('生产级联联动 类型→引擎→档位→主按钮文案 期望值比对');
   }

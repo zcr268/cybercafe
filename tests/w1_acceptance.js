@@ -77,6 +77,11 @@ const badgesOf = el => el.filter(e => !e.btn && !e.link && e.bg && e.bg !== 'rgb
 const task = await useOrCreateTaskSpace('W1-部署状态操作列统一验收');
 await openOrReuseTab(BASE + '/', { wait: true, timeout: 20 });
 actions.push('打开真实页面 ' + BASE);
+// 视口固定（t30 环境发现：ego 窗口偶发 0×0 视口 → captureScreenshot 0-width 失败 + F5 CDP 坐标点击退化）。
+// Emulation.setDeviceMetricsOverride 一次到位：坐标型 CDP 点击与截图稳健前提。
+try { await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }); actions.push('固定视口 1440×900'); } catch (e) { actions.push('视口固定失败（尽力而为）：' + String(e && e.message || e)); }
+const vp = await js(`(() => ({ w: window.innerWidth, h: window.innerHeight }))()`);
+if (vp.w < 100) actions.push('警告：视口异常 ' + JSON.stringify(vp));
 const appVisible = await js(`(() => { const a = document.getElementById('app'); return !!a && getComputedStyle(a).display !== 'none'; })()`);
 if (!appVisible) {
   await fillInput('#tokenIn', ADMIN);
@@ -234,7 +239,7 @@ const interaction = {};
     const group = d.buttons.filter(isGroup);
     cs.push(['主按钮唯一（非通用组按钮恰 1 个）', nonGroup.length === 1, nonGroup.map(b => b.text).join('|') || '∅']);
     const depBtn = nonGroup[0];
-    cs.push(['主按钮文案∈{部署引擎,安装 OCR,安装 H3}', !!depBtn && /部署引擎|安装 OCR|安装 H3/.test(depBtn.text), depBtn ? depBtn.text : '∅']);
+    cs.push(['主按钮文案=部署引擎（t31 统一，恒文案）', !!depBtn && depBtn.text === '部署引擎', depBtn ? depBtn.text : '∅']);
     const exp = ['隧道', '详情', '日志', '回收', '删除'];
     cs.push(['通用组恰 5 个且顺序 隧道→详情→日志→回收→删除', group.length === 5 && group.every((b, i) => new RegExp(exp[i]).test(b.text)), group.map(b => b.text).join('→') || '∅']);
     cs.push(['无「停止」按钮', !d.buttons.some(b => /停止/.test(b.text)), d.buttons.map(b => b.text).join('|')]);
@@ -268,8 +273,8 @@ const interaction = {};
     interaction.cascade = casc;
     const eqArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
     cs.push(['F1 级联初始(text): 引擎多选≥1/档位≥1/主按钮=部署引擎', casc.initial.btn === '部署引擎' && casc.initial.e.length >= 1 && casc.initial.o.length >= 1, JSON.stringify(casc.initial)]);
-    cs.push(['F1 切图生文(ocr): 引擎=[OCR]/档位含rapidocr/主按钮=安装 OCR', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '安装 OCR', JSON.stringify(casc.ocr)]);
-    cs.push(['F1 切文生视频(h3): 引擎=[H3]/档位含h3档/主按钮=安装 H3', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '安装 H3', JSON.stringify(casc.h3)]);
+    cs.push(['F1 切图生文(ocr): 引擎=[OCR]/档位含rapidocr/主按钮恒=部署引擎', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '部署引擎', JSON.stringify(casc.ocr)]);
+    cs.push(['F1 切文生视频(h3): 引擎=[H3]/档位含h3档/主按钮恒=部署引擎', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '部署引擎', JSON.stringify(casc.h3)]);
     cs.push(['F1 切回文生文(text): 主按钮=部署引擎/引擎恢复多选', casc.text.btn === '部署引擎' && casc.text.e.length >= 1 && casc.text.o.length >= 1, JSON.stringify(casc.text)]);
     actions.push('F1 级联联动：类型 文生文→图生文→文生视频→文生文，期望值比对 ' + ['initial', 'ocr', 'h3', 'text'].every(k => {
       const c = casc[k]; return c && c.btn; }) ? '已比对' : '异常');
@@ -342,7 +347,7 @@ const interaction = {};
     interaction.fold = fold;
   }
 
-  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮随类型 + 通用组 隧道→详情→日志→回收→删除）+ F1 联动断言 + F5 可点性断言',
+  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮恒「部署引擎」（t31 统一文案） + 通用组 隧道→详情→日志→回收→删除）+ F1 联动断言 + F5 可点性断言',
     pass: cs.every(c => c[1]), checks: cs });
 }
 
