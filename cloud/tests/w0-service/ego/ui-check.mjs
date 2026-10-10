@@ -1,10 +1,19 @@
 // W0 云项目真实服务化 · UI 真实页面验证（ego 浏览器）
 // 打开真实 URL → 真实登录（填 ADMIN_TOKEN）→ 等待管理台渲染 → 截图留证 → 输出结论
-// 用法: BASE_URL=... ADMIN_TOKEN=... SHOT_DIR=... ego-browser-dsh nodejs < ego/ui-check.mjs
+// 运行参数经绝对路径配置文件注入（ego-browser-dsh nodejs 子进程 process.env 为空，实测不传播）；
+// 配置文件路径由 run-ui-check.sh 以 __UI_ENV_CFG__ 占位符注入，失败时回落环境变量/默认值。
 // 输出: JSON { url, actions[], screenshot, tableState, conclusion }
-const base = process.env.BASE_URL || "http://127.0.0.1:8788";
-const token = process.env.ADMIN_TOKEN || "dev-admin-token-8848";
-const shotDir = process.env.SHOT_DIR || ".out";
+const env = { base: "http://127.0.0.1:8788", token: "dev-admin-token-8848", shotDir: ".out" };
+try {
+  const fs = await import("node:fs");
+  const cfg = JSON.parse(fs.readFileSync("__UI_ENV_CFG__", "utf8"));
+  env.base = cfg.base; env.token = cfg.token; env.shotDir = cfg.shotDir;
+} catch (e) {
+  env.base = process.env.BASE_URL || env.base;
+  env.token = process.env.ADMIN_TOKEN || env.token;
+  env.shotDir = process.env.SHOT_DIR || env.shotDir;
+}
+const base = env.base, token = env.token, shotDir = env.shotDir;
 const out = { url: base + "/", actions: [], screenshot: null, tableState: null, conclusion: "FAIL" };
 
 const task = await useOrCreateTaskSpace("w0-service-ui");

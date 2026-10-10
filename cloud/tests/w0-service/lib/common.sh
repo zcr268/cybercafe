@@ -28,11 +28,12 @@ skip()    { TEST_N=$((TEST_N+1)); SKIP_N=$((SKIP_N+1)); printf 'skip %d - %s\n' 
 not_ok()  { TEST_N=$((TEST_N+1)); FAIL_N=$((FAIL_N+1)); printf 'not ok %d - %s\n' "$TEST_N" "$1"; }
 
 # ---------- HTTP 请求 helper ----------
-# req METHOD PATH [curl 额外参数...] → 设 $HTTP_CODE $BODY $CTYPE
+# req METHOD PATH [curl 额外参数...] → 设 $HTTP_CODE $BODY $CTYPE $BODY_FILE（原始响应体文件）
 _TMP_BODY="${OUT_DIR}/.last_body.$$"
 req() {
   local m="$1" p="$2"; shift 2
   HTTP_CODE=$(curl -s -m "$CURL_TIMEOUT" -X "$m" -o "$_TMP_BODY" -w '%{http_code}' "$@" "${BASE_URL}${p}" 2>/dev/null || echo 000)
+  BODY_FILE="$_TMP_BODY"
   BODY=$(cat "$_TMP_BODY" 2>/dev/null || true)
   CTYPE=$(curl -s -m "$CURL_TIMEOUT" -X "$m" -o /dev/null -w '%{content_type}' "$@" "${BASE_URL}${p}" 2>/dev/null || true)
 }

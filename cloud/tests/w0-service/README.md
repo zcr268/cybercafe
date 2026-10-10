@@ -23,7 +23,9 @@
 ./run.sh --mode baseline --attach --base-url http://127.0.0.1:8788
 
 # 新服务形态全量验收（生命周期 + 持久化重启 + 形态门禁）
-./run.sh --mode service --cmd "node cloud/server.js" --port 8788 --data-dir /tmp/w0-kv
+# 注：SERVICE_CMD 的工作目录是 cloud/tests/w0-service/，server.js 位于其 ../../ 处；
+#     端口经 --port（默认 8788）导出给服务进程，与沙箱/容器端口冲突时改用空闲端口。
+./run.sh --mode service --cmd "node ../../server.js" --port 8788 --data-dir /tmp/w0-kv
 
 # 新服务形态 attach（对已运行端点做契约冒烟）
 ./run.sh --mode service --attach --base-url http://127.0.0.1:8080
@@ -34,8 +36,9 @@
 
 - 默认 `BASE_URL=http://127.0.0.1:8788`、`ADMIN_TOKEN=dev-admin-token-8848`（本地沙箱约定，见仓库 README）。
 - 全量验收（lifecycle 模式）请使用**全新 `--data-dir`**（40 用例对初始 settings 断言白名单成员、50 用例做写入→重启，干净目录保证可重复）。
+- **并发隔离**：每次运行产物落 `.out/run-<pid>/`（service.log / state.json / service.pid / 截图），多执行者共享 worktree 并发跑互不覆盖（实测并发实例曾覆盖 service.pid/state.json 造成假绿，已修复）。
 - 生产容器等价：容器内对 `http://127.0.0.1:8080` 跑 `--mode service --attach --with-ego`（或 `--port 8080`）。
-- 输出：`.out/service.log`、`.out/summary`（TAP 行）、`.out/state.json`（跨用例状态）、`.out/w0-ui-logged-in.png`（ego 截图）。`.out/` 已 gitignore。
+- 输出：`.out/run-<pid>/service.log`、TAP 汇总（stdout）、`.out/run-<pid>/state.json`（跨用例状态）、`.out/run-<pid>/w0-ui-logged-in.png`（ego 截图）。`.out/` 已 gitignore。
 - 退出码：0=全绿；1=有失败；77=预期红已记录（baseline 形态门禁，不判 FAIL）。
 
 ## 服务形态契约（实现方 w2 必须对齐）

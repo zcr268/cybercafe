@@ -47,9 +47,9 @@ assert_code "管理端设备详情 → 200" 200
 assert_eq "设备详情 hostname 已落库" "$(json_field "$BODY" device.hostname)" "w0-dev-1"
 assert_eq "设备详情 batch 已落库" "$(json_field "$BODY" device.batch)" "$BATCH_CODE"
 
-# ---- 心跳（部署中 → 快轮询 3s） ----
+# ---- 心跳（部署中 → 快轮询 3s；worker 语义：部署状态合并读 body.device.deploy） ----
 req_json POST /api/device/heartbeat -H "X-Device-Key: $DEV_KEY" -H "$H_JSON" \
-  -d '{"device":{},"deploy":{"state":"deploying","step":"pull","detail":"pulling image"}}'
+  -d '{"device":{"deploy":{"state":"deploying","step":"pull","detail":"pulling image"}}}'
 assert_code "设备心跳 → 200" 200
 assert_json_ok "设备心跳 ok=true"
 assert_eq "部署中心跳 poll_after=3（快轮询）" "$(json_field "$BODY" poll_after)" "3"

@@ -29,7 +29,8 @@ if [ "$MODE" = "baseline" ]; then
   [ -n "${AGENT_LOCAL_ROOT_BASE:-}" ] && printf 'AGENT_LOCAL_ROOT_BASE=%s\n' "$AGENT_LOCAL_ROOT_BASE" >> "$VARS_FILE"
 fi
 
-# 真实进程：nohup 拉起到独立会话，环境变量经 export 继承
-nohup bash -c "$SERVICE_CMD" >"$OUT_DIR/service.log" 2>&1 &
+# 真实进程：nohup 拉起到独立会话，环境变量经 export 继承。
+# exec 前缀让 bash 壳直接替换为服务进程（$! 即真实服务 PID，避免 kill 壳后 node 孤儿占端口）。
+nohup bash -c "exec $SERVICE_CMD" >"$OUT_DIR/service.log" 2>&1 &
 echo $! > "$OUT_DIR/service.pid"
 echo "启动: $SERVICE_CMD (PID $(cat "$OUT_DIR/service.pid"))"

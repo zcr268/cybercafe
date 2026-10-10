@@ -33,14 +33,28 @@ while [ $# -gt 0 ]; do
 done
 
 export PORT MODE
+export SERVICE_CMD="$CMD"                       # 传给 lifecycle/start.sh（MODE=service 必填；baseline 空则回落 wrangler dev）
+export ADMIN_TOKEN="${ADMIN_TOKEN:-dev-admin-token-8848}"  # nohup 服务子进程经环境继承
 BASE_URL="${BASE_URL_ARG:-http://127.0.0.1:${PORT}}"
 export BASE_URL
-export OUT_DIR="$ROOT/.out"
+# 每次运行独立 OUT_DIR（.out/run-<pid>）：state.json / service.pid / static pidfile / 截图全部实例隔离，
+# 防并发运行（多执行者共享 worktree 时）互踩——已实测踩过（并发实例覆盖 service.pid/state.json 导致假绿）。
+export OUT_DIR="$ROOT/.out/run-$$"
 export DATA_DIR="${DATA_DIR:-$OUT_DIR/data}"
 export AGENT_SRC="${AGENT_SRC_ARG:-$(cd "$ROOT/../../.." && pwd)/agent}"    # 仓库 agent/ 目录
 export REPO_ROOT="${REPO_ROOT_ARG:-$(cd "$ROOT/../../.." && pwd)}"          # 仓库根目录
+export SHOT_DIR="$OUT_DIR"                      # ego 界面验证截图目录（经 run-ui-check.sh 注入）
 
-rm -rf "$OUT_DIR"; mkdir -p "$OUT_DIR" "$DATA_DIR"
+mkdir -p "$OUT_DIR" "$DATA_DIR"
+
+# 清理（EXIT trap：任何退出路径都回收 static 服务器与服务进程，防残留）
+cleanup() {
+  for f in static-agent.pid static-root.pid service.pid; do
+    if [ -f "$OUT_DIR/$f" ]; then kill "$(cat "$OUT_DIR/$f")" 2>/dev/null || true; fi
+  done
+}
+trap cleanup EXIT
+
 echo "== W0 服务化验证启动 =="
 echo "MODE=$MODE BASE_URL=$BASE_URL DATA_DIR=$DATA_DIR ATTACH=$ATTACH"
 
@@ -110,16 +124,10 @@ fi
 if $WITH_EGO; then
   echo ""
   echo "===== ego 浏览器真实页面 UI 验证 ====="
-  export SHOT_DIR="$OUT_DIR"
   out=$(bash ego/run-ui-check.sh 2>&1)
   echo "$out" | tail -8
   if echo "$out" | grep -q '"conclusion":"PASS"'; then echo "EGO UI: PASS"; else echo "EGO UI: FAIL"; FAIL_TOTAL=1; fi
 fi
-
-# ---------- 清理 ----------
-if [ -f "$OUT_DIR/static-agent.pid" ]; then kill "$(cat "$OUT_DIR/static-agent.pid")" 2>/dev/null || true; fi
-if [ -f "$OUT_DIR/static-root.pid" ]; then kill "$(cat "$OUT_DIR/static-root.pid")" 2>/dev/null || true; fi
-if [ -f "$OUT_DIR/service.pid" ]; then kill "$(cat "$OUT_DIR/service.pid")" 2>/dev/null || true; fi
 
 echo ""
 echo "==============================================="

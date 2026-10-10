@@ -53,7 +53,8 @@ assert_contains "批次模式保留占位符（原始下发）" "__DEVICE_KEY__"
 # ---- install-extra 白名单通道（agent 作用域 + root 作用域） ----
 req GET "/install-extra?name=install.sh"
 assert_code "install-extra install.sh → 200" 200
-if [ "$(printf '%s' "$BODY" | shasum -a 256 | cut -c1-8)" = "$LOCAL_INSTALL_SHA" ]; then
+# 字节级比对用原始响应体文件（$BODY 经 $(cat) 会剥尾换行，sha 与文件恒不等）
+if [ "$(shasum -a 256 "$BODY_FILE" | cut -c1-8)" = "$LOCAL_INSTALL_SHA" ]; then
   ok "install-extra 字节与本地 agent/install.sh 一致 (sha=$LOCAL_INSTALL_SHA)"
 else
   not_ok "install-extra 字节与本地 agent/install.sh 不一致"
@@ -61,7 +62,7 @@ fi
 
 req GET "/install-extra?name=uninstall-all.sh"
 assert_code "install-extra uninstall-all.sh（root 通道）→ 200" 200
-assert_contains "root 通道内容为仓库根 uninstall-all.sh" "#!/bin/sh" "$BODY"
+assert_contains "root 通道内容为仓库根 uninstall-all.sh" "#!/usr/bin/env bash" "$BODY"
 req GET "/install-extra?name=ocr/install.sh"
 assert_code "install-extra ocr/install.sh（root 子路径）→ 200" 200
 req GET "/install-extra?name=foobar.sh"
