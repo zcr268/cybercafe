@@ -471,8 +471,10 @@ function oneLiner(d) {
   const dep = d.deploy || {};
   const st = cardState(d);
   const parts = [];
-  if (dep.version) parts.push("v" + dep.version);
-  if (dep.detail) parts.push(dep.detail);
+  // 引擎主部署时，dep.step 属组件步（h3/ocr）的 version/detail 是组件残留，不拼进引擎一句话
+  const compStep = dep.step === "h3" || dep.step === "ocr";
+  if (dep.version && !(dep.engine && compStep)) parts.push("v" + dep.version);
+  if (dep.detail && !(dep.engine && compStep)) parts.push(dep.detail);
   if (targetName(d) === "H3") {
     // H3 档位标注（t108/t111 移植）：dep.quant/tier 优先，旧部署用 components.h3.quant 兜底推导
     const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
@@ -491,10 +493,10 @@ function oneLiner(d) {
 function progressHtml(d) {
   const dep = d.deploy || {};
   const st = cardState(d);
-  if (!["online", "deploying", "installing", "queued"].includes(st)) return "";
+  if (!["online", "running", "deploying", "installing", "queued"].includes(st)) return "";
   if (dep.state === "queued") return barHtml("2%", 2, "blue");
   const pct = deployPct(dep);
-  return barHtml(pct + "%", pct, st === "online" ? "okgreen" : "blue");
+  return barHtml(pct + "%", pct, (st === "online" || st === "running") ? "okgreen" : "blue");
 }
 function statusCardHtml(d, dep) {
   const st = cardState(d);
@@ -984,7 +986,7 @@ const STEP_W = { gpu_check: 5, docker: 10, mirrors: 15, gpu_toolkit: 25, pull_im
                  gateway: 94, tunnel: 97, verify: 100 };
 function deployPct(dep) {
   if (!dep || !dep.state) return 0;
-  if (dep.state === "online") return 100;
+  if (dep.state === "online" || dep.state === "running") return 100;
   if (dep.state === "queued") return 2;
   if (dep.state === "idle" || dep.state === "stopped") return 0;
   if (dep.step === "model_pull" || dep.step === "engine_start" || dep.step === "strata_setup") {
