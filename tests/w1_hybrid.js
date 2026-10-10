@@ -54,6 +54,8 @@ const badgesOf = el => el.filter(e => !e.btn && !e.link && e.bg && e.bg !== 'rgb
 const task = await useOrCreateTaskSpace('W1-混合形态验收-v2');
 await openOrReuseTab(BASE + '/', { wait: true, timeout: 30 });
 actions.push('打开真实页面 ' + BASE);
+// 视口固定（t30 环境发现：ego 窗口偶发 0×0 视口 → 截图/CDP 坐标点击失效），一次到位防复现
+try { await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }); actions.push('固定视口 1440×900'); } catch (e) { actions.push('视口固定失败（尽力而为）：' + String(e && e.message || e)); }
 const appVisible = await js(`(() => { const a = document.getElementById('app'); return !!a && getComputedStyle(a).display !== 'none'; })()`);
 if (!appVisible) {
   await fillInput('#tokenIn', ADMIN);
@@ -193,7 +195,7 @@ const results = [];
     const d = describe[k];
     if (!d.found) { cs.push([k + ': 行未找到', false]); continue; }
     const sels = d.selects;
-    const depBtn = d.buttons.find(b => /部署引擎|安装 OCR|安装 H3/.test(b.text));
+    const depBtn = d.buttons.find(b => /部署引擎/.test(b.text));
     const t0 = sels[0] ? sels[0].options.find(o => o.selected) : null;
     const e0 = sels[1] ? sels[1].options.find(o => o.selected) : null;
     const o0 = sels[2] ? sels[2].options.find(o => o.selected) : null;

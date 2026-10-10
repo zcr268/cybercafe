@@ -471,8 +471,10 @@ function oneLiner(d) {
   const dep = d.deploy || {};
   const st = cardState(d);
   const parts = [];
-  if (dep.version) parts.push("v" + dep.version);
-  if (dep.detail) parts.push(dep.detail);
+  // 引擎主部署时，dep.step 属组件步（h3/ocr）的 version/detail 是组件残留，不拼进引擎一句话
+  const compStep = dep.step === "h3" || dep.step === "ocr";
+  if (dep.version && !(dep.engine && compStep)) parts.push("v" + dep.version);
+  if (dep.detail && !(dep.engine && compStep)) parts.push(dep.detail);
   if (targetName(d) === "H3") {
     // H3 档位标注（t108/t111 移植）：dep.quant/tier 优先，旧部署用 components.h3.quant 兜底推导
     const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
@@ -491,10 +493,10 @@ function oneLiner(d) {
 function progressHtml(d) {
   const dep = d.deploy || {};
   const st = cardState(d);
-  if (!["online", "deploying", "installing", "queued"].includes(st)) return "";
+  if (!["online", "running", "deploying", "installing", "queued"].includes(st)) return "";
   if (dep.state === "queued") return barHtml("2%", 2, "blue");
   const pct = deployPct(dep);
-  return barHtml(pct + "%", pct, st === "online" ? "okgreen" : "blue");
+  return barHtml(pct + "%", pct, (st === "online" || st === "running") ? "okgreen" : "blue");
 }
 function statusCardHtml(d, dep) {
   const st = cardState(d);
@@ -668,8 +670,9 @@ function cascadeEngineHtml(st) {
   if (st.type === "h3") return `<option>H3</option>`;
   return Object.keys((catalog && catalog.engine) || {}).map(e => `<option value="${esc(e)}" ${e === st.engine ? "selected" : ""}>${esc(e)}</option>`).join("");
 }
-function cascadeDeployLabel(st) {
-  return st.type === "ocr" ? "安装 OCR" : st.type === "h3" ? "安装 H3" : "部署引擎";
+// 主按钮文案唯一（用户要求统一）：恒为「部署引擎」，不再随类型分支
+function cascadeDeployLabel() {
+  return "部署引擎";
 }
 function cascadeHtml(d, dep) {
   // 默认（老记录/未部署兼容）：dep.type 与 dep.engine 冲突时以 dep.engine 为准（当前部署类型）
@@ -683,7 +686,7 @@ function cascadeHtml(d, dep) {
       <option value="h3" ${st.type === "h3" ? "selected" : ""}>文生视频</option></select>
     <select id="e_${d.device_id}" onchange="cascadeChanged('${d.device_id}','engine')" style="max-width:104px">${cascadeEngineHtml(st)}</select>
     <select id="o_${d.device_id}" style="max-width:150px">${cascadeOptionsHtml(st)}</select>
-    <button class="sm" id="${d.device_id}_dep_btn" onclick="cascadeDeploy('${d.device_id}')">${cascadeDeployLabel(st)}</button>
+    <button class="sm" id="${d.device_id}_dep_btn" onclick="cascadeDeploy('${d.device_id}')">${cascadeDeployLabel()}</button>
     <br>`;
 }
 window.cascadeChanged = (id, which) => {
@@ -699,7 +702,7 @@ window.cascadeChanged = (id, which) => {
   const e = $("e_" + id), o = $("o_" + id), btn = $(id + "_dep_btn");
   if (e) e.innerHTML = cascadeEngineHtml(st);
   if (o) o.innerHTML = cascadeOptionsHtml(st);
-  if (btn) btn.textContent = cascadeDeployLabel(st);
+  if (btn) btn.textContent = cascadeDeployLabel();
 };
 window.cascadeDeploy = async id => {
   const st = cascadeState(id);
@@ -707,7 +710,7 @@ window.cascadeDeploy = async id => {
   if (st.type === "ocr") { await ocrCmd(id, "install"); return; }
   if (st.type === "h3") { await h3Cmd(id, "install", st.option || "h3-fast"); return; }   // t108：档位不丢
   const model = st.option;
-  if (!confirm(`在设备 ${id} 上部署 ${st.engine} · ${model}？`)) return;
+  if (!confirm("确认执行部署？")) return;
   try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine: st.engine, model }) });
         toast("部署指令已下发，等待设备拉取执行"); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
@@ -984,7 +987,7 @@ const STEP_W = { gpu_check: 5, docker: 10, mirrors: 15, gpu_toolkit: 25, pull_im
                  gateway: 94, tunnel: 97, verify: 100 };
 function deployPct(dep) {
   if (!dep || !dep.state) return 0;
-  if (dep.state === "online") return 100;
+  if (dep.state === "online" || dep.state === "running") return 100;
   if (dep.state === "queued") return 2;
   if (dep.state === "idle" || dep.state === "stopped") return 0;
   if (dep.step === "model_pull" || dep.step === "engine_start" || dep.step === "strata_setup") {
