@@ -268,6 +268,9 @@ async function handleHeartbeat(request, env, dev) {
     rec.remote_ip_ts = now;
   }
   delete rec.command;
+  // t112：busy 非粘滞——心跳不带 busy 标记时清除旧标记（防一次 busy 永久留在记录里误判在线）
+  if (upd.busy === true) { rec.busy = true; if (upd.busy_type) rec.busy_type = upd.busy_type; }
+  else { delete rec.busy; delete rec.busy_type; }
   // deploy 深度合并：agent 部分上报（如 restart_tunnel 仅带 state/tunnel_url）时保留已有
   // engine/model/model_api_key，避免重建隧道后聊天失去鉴权 Key；
   // stop 语义为整体清空运行态 → 直接替换（丢弃过期 tunnel_url/engine 等）
@@ -552,7 +555,9 @@ async function handleAdminDevices(env, url) {
   let retiredHidden = 0;
   for (const rec of recs) {
     if (!rec) continue;
-    rec.online = now - (rec.last_seen || 0) < 35;
+    // t112：耗时指令异步化后心跳持续（35s 正常判在线）；busy/部署进行态兜底放宽窗口（5min），防极端抖动误判离线
+  const _busyState = rec.busy === true || (rec.deploy && ["queued", "deploying", "installing", "uninstalling"].includes(rec.deploy.state));
+  rec.online = (now - (rec.last_seen || 0) < 35) || (_busyState && now - (rec.last_seen || 0) < 300);
     const secs = deviceOfflineSeconds(rec, now);
     if (secs >= retireAfterS) {
       if (!includeRetired) { retiredHidden++; continue; }   // 退役隐藏（计数），?include_retired=1 展开
@@ -702,7 +707,9 @@ async function handleAdminDeviceDetail(env, id) {
   if (!rec) return json({ error: "not found" }, 404);
   const logs = (await env.CYBERCAFE_KV.get(`log:${id}`, "json")) || [];
   const now = Math.floor(Date.now() / 1000);
-  rec.online = now - (rec.last_seen || 0) < 35;
+  // t112：耗时指令异步化后心跳持续（35s 正常判在线）；busy/部署进行态兜底放宽窗口（5min），防极端抖动误判离线
+  const _busyState = rec.busy === true || (rec.deploy && ["queued", "deploying", "installing", "uninstalling"].includes(rec.deploy.state));
+  rec.online = (now - (rec.last_seen || 0) < 35) || (_busyState && now - (rec.last_seen || 0) < 300);
   return json({ ok: true, device: rec, logs });
 }
 

@@ -502,7 +502,7 @@ function buildRowCells(d) {
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}`,
       `${hw || "-"}${usage}`,
-      `<span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${deployInfo}${compLine}`,
+      `<span class="state ${isOn ? "online" : "offline"}">${isOn ? "在线" : "离线"}</span>${d.busy === true ? ` · <span class="state" style="color:#f59e0b">忙（${esc(d.busy_type || "部署中")}）</span>` : ""}${deployInfo}${compLine}`,
       `<div class="row">${cascadeHtml(d, dep, ocrSt, h3St)}
         <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">重建隧道</button>
         <button class="sm gray" onclick="cmd('${d.device_id}','stop')">停止</button>
