@@ -45,6 +45,10 @@ cd deploy/aliyun
 ADMIN_TOKEN=<口令> CF_TUNNEL_TOKEN=<隧道token> docker compose up -d --build
 ```
 
+> **服务化升级后首次启动如设备/批次缺失**（旧 wrangler sqlite → kv.json 未迁移），执行
+> `docker exec aliyun-cloud-1 sh /root/work/cybercafe/deploy/aliyun/migrate-kv.sh /data`
+> 把 `DATA_DIR/v3/kv/` 旧库（`_mf_entries` + `blobs/`）还原合并进 `DATA_DIR/kv.json`（旧库优先、备份后原子写回、输出统计）。
+
 - 环境变量契约（本地与生产同名读取，详见 `cloud/server.js` 头注释与 `cloud/tests/w0-service/README.md`）：
   `PORT`、`ADMIN_TOKEN`、`DATA_DIR`、`GITHUB_RAW_BASE` / `JSDELIVR_RAW_BASE`、`AGENT_LOCAL_BASE` / `AGENT_LOCAL_ROOT_BASE`。
 - 代码全部使用请求来源地址下发配置，绑固定域名后零改动；生产固定域名 `cybercafe.akkak.kdns.fr`。
