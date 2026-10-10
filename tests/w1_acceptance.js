@@ -1,7 +1,13 @@
-// W1-1 验收断言套件（t2「两列统一」门禁）
-// 覆盖验收点：A1 状态卡四要素结构 / A2 操作列三段 / A3 状态色板 / A4 OCR·H3 显进度 / A5 组件行+死代码 / A6 无注释式文案
-// red phase（当前基线）运行预期多例失败；t2 实现后应全绿。
-// 输出：{ url, 操作序列, 截图, results, 被测路径, 结论 }（cliLog）
+// W1-1 验收断言套件（t2「两列统一」门禁）——修复轮 F1–F5（t5 审查打回项）
+// 修复清单：
+//   F1 级联联动（切类型→引擎/档位/主按钮同步刷新）补期望值比对断言并计入 A2 门禁 verdicts（机器可判定，杜绝假阴性）
+//   F2 组件态行（installing/uninstalling）纳入 A1 四要素断言（名称徽章→状态徽章→进度→一句话）
+//   F3 基线截图不入库理由：README + .gitignore 说明（时间戳截图是每次运行的可再生证据，非受控交付物）
+//   F4 色族判定规则 README 与 colorFamily 实现严格对齐（dark→gray→green→blue→red→amber 显式优先级，红=g<=b）
+//   F5 「详情/日志」真实点击从附验升级为 A2 门禁断言（折叠须展开、日志 tab 须激活）
+// 覆盖验收点：A1 状态卡四要素 / A2 操作列三段+级联联动+通用组可点 / A3 状态色板 / A4 OCR·H3 显进度 / A5 死代码+组件行 / A6 文案纪律
+// red phase（基线，t2 未实现）运行预期多例失败；t2 实现后应 A1–A6 全 PASS。
+// 输出：{ url, 操作序列, 截图, results(含 A1..A6 每条机器可比 checks), interaction, knownIssues, 被测路径, 结论 }（cliLog）
 (async () => {
 const BASE = 'http://127.0.0.1:8788';
 const ADMIN = 'dev-admin-token-8848';
@@ -18,7 +24,7 @@ const shot = async (name) => {
   try { await captureScreenshot(p); shots.push(p); return p; } catch (e) { return 'SHOT_FAIL:' + (e && e.message || e); }
 };
 
-// ---------- 种子场景 ----------
+// ---------- 种子场景（含组件态：F2） ----------
 const scenarios = [
   { key: 'run',     host: 'w1-运行中',   state: 'running',      family: 'green',  name: 'ollama', needProg: true,
     deploy: { state: 'online', engine: 'ollama', model: 'qwen2.5:7b-instruct', version: '0.5.3', step: 'verify', step_state: 'ok', detail: '', tunnel_url: 'https://seed.trycloudflare.com' } },
@@ -32,19 +38,26 @@ const scenarios = [
     deploy: { state: 'stopped' } },
   { key: 'failed',  host: 'w1-失败',     state: 'failed',       family: 'red',    name: 'ollama', needProg: false,
     deploy: { state: 'failed', engine: 'ollama', step: 'docker', step_state: 'fail', detail: '拉取镜像超时' } },
-  { key: 'ocr-install',   host: 'w1-OCR安装中',   state: 'installing',    comps: { ocr: { state: 'installing' },  h3: { state: 'uninstalled' } },
+  { key: 'ocr-install',   host: 'w1-OCR安装中',   state: 'installing',    name: 'OCR', needProg: true,
+    comps: { ocr: { state: 'installing' }, h3: { state: 'uninstalled' } },
     deploy: { state: 'deploying', step: 'model_pull', step_state: 'ok', detail: '组件安装 60%' } },
-  { key: 'h3-install',    host: 'w1-H3安装中',    state: 'installing',    comps: { ocr: { state: 'uninstalled' }, h3: { state: 'installing' } },
+  { key: 'h3-install',    host: 'w1-H3安装中',    state: 'installing',    name: 'H3', needProg: true,
+    comps: { ocr: { state: 'uninstalled' }, h3: { state: 'installing' } },
     deploy: { state: 'deploying', step: 'model_pull', step_state: 'ok', detail: '组件安装 75%' } },
-  { key: 'ocr-uninstall', host: 'w1-OCR卸载中',   state: 'uninstalling',  family: 'amber-degraded', comps: { ocr: { state: 'uninstalling' }, h3: { state: 'uninstalled' } } },
+  { key: 'ocr-uninstall', host: 'w1-OCR卸载中',   state: 'uninstalling',  name: 'OCR', needProg: false, family: 'amber-degraded',
+    comps: { ocr: { state: 'uninstalling' }, h3: { state: 'uninstalled' } } },
 ];
 const devicesById = {};   // key -> device_id
 
 // ---------- 语义表 ----------
-const STATE_TOKENS = ['运行中','online','部署中','deploying','排队','queued','已停止','停止','stopped','闲置','idle','失败','failed','卸载中','uninstalling'];
+const STATE_TOKENS = ['运行中','online','部署中','deploying','排队','queued','已停止','停止','stopped','闲置','idle','失败','failed','安装中','installing','卸载中','uninstalling'];
 const PRESENCE = ['在线','离线'];
 const WORDS_BY_KEY = { running: ['运行中','online'], deploying: ['部署中','deploying'], queued: ['排队','queued'],
-  idle: ['闲置','idle'], stopped: ['已停止','停止','stopped'], failed: ['失败','failed'], uninstalling: ['卸载中','uninstalling'] };
+  idle: ['闲置','idle'], stopped: ['已停止','停止','stopped'], failed: ['失败','failed'],
+  installing: ['安装中','installing'], uninstalling: ['卸载中','uninstalling'] };
+// F4：色族判定（与 tests/README.md「验收契约 A3」文字完全一致）
+//   优先级：dark(全通道<50) → gray(|r-g|<30 且 |g-b|<30) → green(g≥r 且 g≥b) → blue(b>r 且 b>g)
+//           → red(r>g 且 r>b 且 g≤b) → amber(r>g 且 g>b) → none
 const colorFamily = rgb => {
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(String(rgb));
   if (!m) return 'none';
@@ -52,9 +65,9 @@ const colorFamily = rgb => {
   if (Math.max(r, g, b) < 50) return 'dark';
   if (Math.abs(r - g) < 30 && Math.abs(g - b) < 30) return 'gray';
   if (g >= r && g >= b) return 'green';
-  if (r > b && g > b) return 'amber';
   if (b > r && b > g) return 'blue';
-  if (r > g && r > b) return 'red';
+  if (r > g && r > b && g <= b) return 'red';
+  if (r > g && g > b) return 'amber';
   return 'none';
 };
 const lum = rgb => { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(String(rgb)); return m ? 0.2126 * (+m[1]) + 0.7152 * (+m[2]) + 0.0722 * (+m[3]) : 0; };
@@ -165,12 +178,12 @@ actions.push('摘录 9 行 状态/操作列 DOM');
 
 // ---------- 断言 ----------
 const results = [];
+const interaction = {};
 
-// A1 状态卡四要素
+// A1 状态卡四要素（F2：含 installing/uninstalling 组件态行）
 {
   const r = { id: 'A1', name: '部署状态列=部署物状态卡（名称徽章→状态徽章→进度→一句话）', checks: [] };
   for (const sc of scenarios) {
-    if (sc.state === 'installing' || sc.state === 'uninstalling') continue;   // 组件态在 A4/A3 覆盖
     const d = describe[sc.key];
     if (!d.found) { r.checks.push([sc.key + ': 行未找到', false]); continue; }
     const st = d.statusEl;
@@ -204,11 +217,11 @@ const results = [];
   results.push(r);
 }
 
-// A2 操作列三段
+// A2 操作列三段（F1：级联联动期望值比对；F5：通用组真实点击计入门禁）
 {
   const d = describe.run;
   const cs = [];
-  if (!d.found) { cs.push(['行未找到', false]); }
+  if (!d.found) { cs.push(['run 行未找到', false]); }
   else {
     const sels = d.selects;
     cs.push(['级联≥3 select', sels.length >= 3, sels.length]);
@@ -229,7 +242,80 @@ const results = [];
     const grpIdx = group[0] ? d.buttons.indexOf(group[0]) : -1;
     cs.push(['段序 级联主按钮<通用组', depIdx >= 0 && grpIdx >= 0 && depIdx < grpIdx, depIdx + '/' + grpIdx]);
   }
-  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮随类型 + 通用组 隧道→详情→日志→回收→删除）',
+
+  // F1：级联联动（真实 change 事件触发页面 onchange → 期望值比对，计入门禁）
+  const rid = devicesById.run;
+  if (!rid) {
+    cs.push(['F1 级联联动（run 设备未取得，无法执行）', false, '']);
+  } else {
+    const casc = await js(`(async () => {
+      const id = ${JSON.stringify(rid)};
+      const t = document.getElementById('t_' + id);
+      const read = () => ({
+        e: [...document.getElementById('e_' + id).options].map(o => o.value || o.textContent.trim()),
+        o: [...document.getElementById('o_' + id).options].map(o => o.textContent.trim()),
+        btn: document.getElementById(id + '_dep_btn').textContent.trim()
+      });
+      const out = { initial: read() };
+      t.value = 'ocr'; t.dispatchEvent(new Event('change', { bubbles: true }));
+      out.ocr = read();
+      t.value = 'h3'; t.dispatchEvent(new Event('change', { bubbles: true }));
+      out.h3 = read();
+      t.value = 'text'; t.dispatchEvent(new Event('change', { bubbles: true }));
+      out.text = read();
+      return out;
+    })()`);
+    interaction.cascade = casc;
+    const eqArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
+    cs.push(['F1 级联初始(text): 引擎多选≥1/档位≥1/主按钮=部署引擎', casc.initial.btn === '部署引擎' && casc.initial.e.length >= 1 && casc.initial.o.length >= 1, JSON.stringify(casc.initial)]);
+    cs.push(['F1 切图生文(ocr): 引擎=[OCR]/档位含rapidocr/主按钮=安装 OCR', eqArr(casc.ocr.e, ['OCR']) && casc.ocr.o.some(x => /rapidocr/.test(x)) && casc.ocr.btn === '安装 OCR', JSON.stringify(casc.ocr)]);
+    cs.push(['F1 切文生视频(h3): 引擎=[H3]/档位含h3档/主按钮=安装 H3', eqArr(casc.h3.e, ['H3']) && casc.h3.o.some(x => /h3-/.test(x)) && casc.h3.btn === '安装 H3', JSON.stringify(casc.h3)]);
+    cs.push(['F1 切回文生文(text): 主按钮=部署引擎/引擎恢复多选', casc.text.btn === '部署引擎' && casc.text.e.length >= 1 && casc.text.o.length >= 1, JSON.stringify(casc.text)]);
+    actions.push('F1 级联联动：类型 文生文→图生文→文生视频→文生文，期望值比对 ' + ['initial', 'ocr', 'h3', 'text'].every(k => {
+      const c = casc[k]; return c && c.btn; }) ? '已比对' : '异常');
+    await shot('w1-cascade');
+  }
+
+  // F5：通用组「详情/日志」真实点击（计入门禁）
+  if (!rid) {
+    cs.push(['F5 通用组真实点击（run 设备未取得，无法执行）', false, '']);
+  } else {
+    const fold = {};
+    try {
+      await click('text=详情 >> nth=0', { label: '点击详情' });
+      fold.detail = await js(`(async () => {
+        const id = ${JSON.stringify(rid)};
+        const el = document.getElementById('detail_' + id);
+        const t0 = Date.now();
+        while (Date.now() - t0 < 8000) {
+          if (el && el.style.display === '') return '展开';
+          await new Promise(r => setTimeout(r, 300));
+        }
+        return el ? '未展开(det存在)' : '未展开(det未挂载)';
+      })()`);
+      await click('text=日志 >> nth=0', { label: '点击日志' });
+      await wait(1);
+      fold.logTab = await js(`(() => {
+        const id = ${JSON.stringify(rid)};
+        const b = document.getElementById('tabB_' + id + '_body');
+        return b ? (b.style.display === '' ? '日志tab激活' : '未激活') : '无tabB';
+      })()`);
+      cs.push(['F5 真实点击「详情」→ 折叠展开', fold.detail === '展开', fold.detail + ' / logTab=' + fold.logTab]);
+      cs.push(['F5 真实点击「日志」→ 日志tab激活', fold.logTab === '日志tab激活', fold.logTab]);
+      cs.push(['F5 真实点击执行无异常', true, 'ok']);
+      actions.push('F5 通用组真实点击 详情/日志：' + JSON.stringify(fold));
+      await shot('w1-ops-detail');
+      // 收起折叠，避免遮挡后续截图
+      await js(`(() => { const id = ${JSON.stringify(rid)}; const el = document.getElementById('detail_' + id); if (el && el.style.display === '') el.style.display = 'none'; return true; })()`);
+    } catch (e) {
+      fold.clickError = String(e && e.message || e);
+      cs.push(['F5 真实点击 详情/日志 执行异常', false, fold.clickError]);
+      actions.push('F5 通用组真实点击执行异常：' + fold.clickError);
+    }
+    interaction.fold = fold;
+  }
+
+  results.push({ id: 'A2', name: '操作列固定三段（级联类型→引擎→档位 + 主按钮随类型 + 通用组 隧道→详情→日志→回收→删除）+ F1 联动断言 + F5 可点性断言',
     pass: cs.every(c => c[1]), checks: cs });
 }
 
@@ -296,66 +382,6 @@ const results = [];
     ] });
 }
 
-// ---------- A2 交互附验：级联联动 + 真实点击通用组 ----------
-const interaction = {};
-{
-  const id = devicesById.run;
-  if (id) {
-    interaction.cascade = await js(`(async () => {
-      const id = ${JSON.stringify(id)};
-      const t = document.getElementById('t_' + id);
-      const read = () => ({
-        e: [...document.getElementById('e_' + id).options].map(o => o.value || o.textContent.trim()),
-        o: [...document.getElementById('o_' + id).options].map(o => o.textContent.trim()),
-        btn: document.getElementById(id + '_dep_btn').textContent.trim()
-      });
-      const out = { initial: read() };
-      t.value = 'ocr'; t.dispatchEvent(new Event('change', { bubbles: true }));
-      out.ocr = read();
-      t.value = 'h3'; t.dispatchEvent(new Event('change', { bubbles: true }));
-      out.h3 = read();
-      t.value = 'text'; t.dispatchEvent(new Event('change', { bubbles: true }));
-      out.text = read();
-      return out;
-    })()`);
-    actions.push('级联交互：类型 文生文→图生文→文生视频→文生文，断言引擎/档位/主按钮联动');
-    await shot('w1-cascade');
-
-    // 真实点击：详情 → 折叠展开；日志 → tabB（附验：不改 A2 门禁，结果进 knownIssues）
-    const fold = {};
-    try {
-      await click('text=详情 >> nth=0', { label: '点击详情' });
-      fold.detail = await js(`(async () => {
-        const id = ${JSON.stringify(id)};
-        const el = document.getElementById('detail_' + id);
-        const t0 = Date.now();
-        while (Date.now() - t0 < 8000) {
-          if (el && el.style.display === '') return '展开';
-          await new Promise(r => setTimeout(r, 300));
-        }
-        return el ? '未展开(det存在)' : '未展开(det未挂载)';
-      })()`);
-      await click('text=日志 >> nth=0', { label: '点击日志' });
-      await wait(1);
-      fold.logTab = await js(`(() => {
-        const id = ${JSON.stringify(id)};
-        const b = document.getElementById('tabB_' + id + '_body');
-        return b ? (b.style.display === '' ? '日志tab激活' : '未激活') : '无tabB';
-      })()`);
-      actions.push('真实点击 通用组 详情/日志：' + JSON.stringify(fold));
-    } catch (e) {
-      fold.clickError = String(e && e.message || e);
-      actions.push('通用组真实点击失败：' + fold.clickError);
-    }
-    interaction.fold = fold;
-    await shot('w1-ops-detail');
-    // 收起折叠，避免遮挡后续截图
-    await js(`(() => { const id = ${JSON.stringify(id)}; const el = document.getElementById('detail_' + id); if (el && el.style.display === '') el.style.display = 'none'; return true; })()`);
-  } else {
-    actions.push('未取得 run 设备 device_id，跳过级联/点击附验');
-  }
-}
-
 // ---------- 清理种子设备 ----------
 await js(`(async () => {
   const ADMIN = ${JSON.stringify(ADMIN)};
@@ -375,9 +401,9 @@ const knownIssues = [];
 {
   const f = interaction.fold || {};
   if (f.detail && f.detail !== '展开') {
-    knownIssues.push('通用组「详情」真实点击未展开折叠（' + f.detail + '，日志tab=' + (f.logTab || 'n/a') + '）——基线 renderDevices 存在缺陷：创建行时 tr.after(det) 先于 tbody.appendChild(tr)，det 行未挂载（无父节点 after() 为 no-op），toggleDetail 对 null 直接 return；t2 改渲染层时应一并修复');
+    knownIssues.push('F5 门禁：通用组「详情」真实点击未展开折叠（' + f.detail + '，日志tab=' + (f.logTab || 'n/a') + '）——基线 renderDevices 缺陷：创建行时 tr.after(det) 先于 tbody.appendChild(tr)，det 行未挂载（无父节点 after() 为 no-op），toggleDetail 对 null 直接 return；t2 改渲染层时应一并修复');
   }
-  if (f.clickError) knownIssues.push('通用组真实点击投递失败：' + f.clickError);
+  if (f.clickError) knownIssues.push('F5 通用组真实点击投递异常：' + f.clickError);
 }
 const finalOut = {
   url: BASE + '/',
@@ -386,9 +412,9 @@ const finalOut = {
   results: results.map(r => ({ id: r.id, name: r.name, pass: r.pass, checks: r.checks })),
   interaction,
   knownIssues,
-  被测路径: BASE + '（本地沙箱真实运行页面，wrangler dev，token dev-admin-token-8848）',
-  结论: 'red phase（基线）运行：' + Object.entries(verdicts).map(([k, v]) => k + '=' + v).join(' ') +
-        '；t2 实现后应 A1–A6 全 PASS。',
+  被测路径: BASE + '（本地沙箱真实运行页面，token dev-admin-token-8848）',
+  结论: '修复轮实跑（基线，t2 未实现=red phase）：' + Object.entries(verdicts).map(([k, v]) => k + '=' + v).join(' ') +
+        '；F1–F5 已修复且全部计入机器判定 verdicts，t6 实现落地后复跑须 A1–A6 全 PASS。',
 };
 cliLog(JSON.stringify(finalOut, null, 1));
 await completeTaskSpace('W1-部署状态操作列统一验收', { keep: false });
