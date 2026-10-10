@@ -77,6 +77,11 @@ const badgesOf = el => el.filter(e => !e.btn && !e.link && e.bg && e.bg !== 'rgb
 const task = await useOrCreateTaskSpace('W1-部署状态操作列统一验收');
 await openOrReuseTab(BASE + '/', { wait: true, timeout: 20 });
 actions.push('打开真实页面 ' + BASE);
+// 视口固定（t30 环境发现：ego 窗口偶发 0×0 视口 → captureScreenshot 0-width 失败 + F5 CDP 坐标点击退化）。
+// Emulation.setDeviceMetricsOverride 一次到位：坐标型 CDP 点击与截图稳健前提。
+try { await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }); actions.push('固定视口 1440×900'); } catch (e) { actions.push('视口固定失败（尽力而为）：' + String(e && e.message || e)); }
+const vp = await js(`(() => ({ w: window.innerWidth, h: window.innerHeight }))()`);
+if (vp.w < 100) actions.push('警告：视口异常 ' + JSON.stringify(vp));
 const appVisible = await js(`(() => { const a = document.getElementById('app'); return !!a && getComputedStyle(a).display !== 'none'; })()`);
 if (!appVisible) {
   await fillInput('#tokenIn', ADMIN);
