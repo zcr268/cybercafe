@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.request
@@ -599,6 +600,11 @@ def heartbeat(extra=None):
     # OCR installed 常驻），deploy.state 与 components.* 一致；引擎 deploy 仍走 L3 上报
     if _component_deploy:
         payload["device"]["deploy"] = dict(_component_deploy)
+    if _async_busy():
+        # t112：心跳带 busy/working 标记（云端放宽离线阈值兜底 + UI 忙提示）
+        payload["device"]["busy"] = True
+        payload["device"]["busy_type"] = _async_busy_type() or ""
+        payload["device"]["busy_since"] = int(_async_state["since"])
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -916,6 +922,7 @@ def run_ocr(action):
     src_dir = "/opt/cybercafe-ocr-src"  # 脚本源目录（与 OCR_DIR 分离：install.sh 用
     #  cp 装 ocr.py 到 OCR_DIR，若 SCRIPT_DIR==OCR_DIR 会 cp 同文件触发 set -e 中止）
     os.makedirs(src_dir, exist_ok=True)
+    os.makedirs(ocr_dir, exist_ok=True)   # t112：防御——install 日志重定向需 OCR_DIR 在（机器被手动清除后防崩）
     if action == "install":
         _ensure_docker_prep("ocr")          # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_ocr("ocr/ocr.py", src_dir + "/ocr.py")
@@ -1282,10 +1289,61 @@ def _ensure_disk_before_deploy(engine, model):
     report_progress("disk", "ok" if ok else "fail", detail)
     return (ok, free1, freed, items)
 
+# t112：耗时指令异步化——主循环只做心跳+poll，长指令（引擎部署/OCR/H3/recycle）由后台 worker 执行，
+# 心跳持续保活不被阻塞（不再因 35s 无心跳被云端误判离线）；单槽互斥：busy 期间新长指令如实拒绝，
+# 失败如实上报（deploy.state=failed），互斥清理（_stop_other_deployments）沿用既有链路。
+_LONG_CMDS = ("deploy", "recycle", "ocr", "h3")
+_async_state = {"busy": False, "type": None, "since": 0.0}
+_async_lock = threading.Lock()
+
+def _async_busy():
+    with _async_lock:
+        return bool(_async_state["busy"])
+
+def _async_busy_type():
+    with _async_lock:
+        return _async_state["type"]
+
+def _async_mark(ctype):
+    with _async_lock:
+        _async_state.update(busy=True, type=ctype, since=time.time())
+
+def _async_idle():
+    with _async_lock:
+        _async_state.update(busy=False, type=None, since=0.0)
+
+def _async_worker(cmd):
+    try:
+        _exec_command(cmd)
+    except Exception as e:
+        # t112 终止路径：异步任务异常如实上报（不静默丢）——progress fail + deploy.state=failed
+        log("异步任务异常: %s" % e)
+        traceback.print_exc()
+        report_progress("command", "fail", "异步任务异常: %s" % str(e)[:200])
+        report_deploy_result(False, engine=cmd.get("engine", ""), model=cmd.get("model", ""))
+    finally:
+        _async_idle()
+
 def handle_command(cmd):
     ctype = cmd.get("type")
     action = cmd.get("action", "")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
+    if ctype in _LONG_CMDS:
+        if _async_busy():
+            # t112 并发安全：单槽互斥——busy 期间新长指令如实拒绝（不排队不乱跑）
+            log("设备忙（正在执行 %s），拒绝并发长指令 %s" % (_async_busy_type(), ctype))
+            report_progress("command", "fail",
+                "设备忙（正在执行 %s），请完成后再试" % (_async_busy_type() or "长任务"))
+            return
+        _async_mark(ctype)
+        log("t112 长指令 %s 异步执行（主循环继续心跳保活）" % ctype)
+        threading.Thread(target=_async_worker, args=(cmd,), daemon=True).start()
+        return
+    # 短指令（stop/restart_tunnel 等）同步执行，行为不变
+    _exec_command(cmd)
+
+def _exec_command(cmd):
+    ctype = cmd.get("type")
     try:
         if ctype in ("deploy", "stop", "restart_tunnel"):
             if ctype == "deploy":
