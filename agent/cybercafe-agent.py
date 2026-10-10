@@ -822,6 +822,30 @@ def _fetch_ocr(script_name, out_path, mode=0o755):
     _atomic_write(out_path, src, mode)
     return src
 
+def _ensure_docker_prep(name):
+    """t106：组件 docker-prep 运行时兜底——部署前检测（标记/镜像），缺失临时执行。
+    标记 /opt/cybercafe/docker-prep.<name>.done 在位 → 零动作跳过；
+    脚本不存在（L1 未落位/未入库）→ 跳过（B 脚本现场构建兜底）；
+    脚本存在且未就绪 → 临时执行（幂等，完成写标记）。"""
+    prep_dir = "/opt/cybercafe/docker-prep"
+    marker = "/opt/cybercafe/docker-prep.%s.done" % name
+    script = os.path.join(prep_dir, "docker-prep.%s.sh" % name)
+    if os.path.isfile(marker):
+        log("docker-prep %s 已就绪（标记在位），零动作跳过" % name)
+        return 0
+    if not os.path.isfile(script):
+        log("docker-prep %s 脚本不存在（L1 未落位/未入库），跳过" % name)
+        return 0
+    log("t106 运行时兜底：%s 未 docker-prep，临时执行 %s" % (name, script))
+    rc, out = run("bash %s" % script, timeout=2000)
+    if rc != 0:
+        import traceback
+        log(out[-800:])
+        raise RuntimeError("docker-prep %s 临时执行失败（rc=%d；重试/手动可补，安装中止）" % (name, rc))
+    log("docker-prep %s 已就绪（临时执行完成）" % name)
+    return 0
+
+
 def run_ocr(action):
     """OCR 安装/卸载：云端拉取 install.sh/ocr.py/uninstall.sh → 校验 → 执行 → 状态回传。
     与 L3 同纪律：拉不到/校验不过 → 如实 fail，绝不静默成功。"""
@@ -831,6 +855,7 @@ def run_ocr(action):
     #  cp 装 ocr.py 到 OCR_DIR，若 SCRIPT_DIR==OCR_DIR 会 cp 同文件触发 set -e 中止）
     os.makedirs(src_dir, exist_ok=True)
     if action == "install":
+        _ensure_docker_prep("ocr")          # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_ocr("ocr/ocr.py", src_dir + "/ocr.py")
         _fetch_ocr("ocr/install.sh", src_dir + "/install.sh")
         st = {"state": "installing", "ts": int(time.time())}
@@ -913,6 +938,7 @@ def run_h3(action):
     src_dir = _H3_SRC_DIR                  # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
     os.makedirs(src_dir, exist_ok=True)
     if action == "install":
+        _ensure_docker_prep("h3")           # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_h3("minimax-h3/install.sh", src_dir + "/install.sh")
         st = {"state": "installing", "ts": int(time.time())}
         _atomic_write(_h3_marker, _json.dumps(st))

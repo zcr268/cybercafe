@@ -265,6 +265,28 @@ def step_gpu_toolkit():
     time.sleep(3)
     return "nvidia-container-toolkit 安装完成" + src_detail
 
+def step_docker_prep(engine):
+    """t106：运行时 docker-prep 兜底——部署前检测对应 docker-prep 就绪
+    （标记 /opt/cybercafe/docker-prep.<engine>.done 或镜像已存在）；
+    未就绪且有脚本 → 临时执行 docker-prep.<engine>.sh（自动闭环），再部署。
+    无脚本（引擎尚未入库 docker-prep，如 ollama 等 t107 前）→ 跳过，零影响。"""
+    prep_dir = "/opt/cybercafe/docker-prep"
+    marker = "/opt/cybercafe/docker-prep.%s.done" % engine
+    script = os.path.join(prep_dir, "docker-prep.%s.sh" % engine)
+    if not os.path.isdir(prep_dir):
+        return "无 docker-prep 目录（L1 未落位），跳过"
+    if os.path.exists(marker):
+        return "docker-prep 已就绪（%s，标记在位），跳过" % engine
+    if not os.path.exists(script):
+        return "无 %s 的 docker-prep 脚本（尚未入库），跳过" % engine
+    log("t106 运行时兜底：%s 未 docker-prep，临时执行 %s" % (engine, script))
+    rc, out = run("bash %s" % script, timeout=2000)
+    if rc != 0:
+        log(out[-800:])
+        raise DeployError("docker-prep %s 临时执行失败（rc=%d；部署中止，重试/手动可补）" % (engine, rc))
+    return "docker-prep 已执行（%s 就绪）" % engine
+
+
 def step_pull_images(engine):
     # strata 为原生进程：无引擎容器镜像，仅拉网关/隧道镜像
     images = ["nginx:alpine", "cloudflare/cloudflared:latest"]
@@ -701,6 +723,7 @@ def deploy(cmd, progress_cb):
         ("docker",        "安装/检查 Docker", step_docker),
         ("mirrors",       "配置镜像加速",      step_mirrors),
         ("gpu_toolkit",   "GPU 容器支持",     step_gpu_toolkit),
+        ("docker_prep",   "docker 前置准备",    None),
         ("pull_images",   "拉取容器镜像",      None),
     ]
     if engine == "strata":
@@ -723,7 +746,9 @@ def deploy(cmd, progress_cb):
     for step_id, title, fn in steps:
         progress_cb(step_id, "running", title)
         try:
-            if step_id == "pull_images":
+            if step_id == "docker_prep":
+                detail = step_docker_prep(engine)
+            elif step_id == "pull_images":
                 detail = step_pull_images(engine)
             elif step_id == "engine_start":
                 detail = step_engine_start(engine, model, progress_cb)
