@@ -195,7 +195,7 @@ const results = [];
     const d = describe[k];
     if (!d.found) { cs.push([k + ': 行未找到', false]); continue; }
     const sels = d.selects;
-    const depBtn = d.buttons.find(b => /部署引擎|安装 OCR|安装 H3/.test(b.text));
+    const depBtn = d.buttons.find(b => /部署引擎/.test(b.text));
     const t0 = sels[0] ? sels[0].options.find(o => o.selected) : null;
     const e0 = sels[1] ? sels[1].options.find(o => o.selected) : null;
     const o0 = sels[2] ? sels[2].options.find(o => o.selected) : null;

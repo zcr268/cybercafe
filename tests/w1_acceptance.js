@@ -239,7 +239,7 @@ const interaction = {};
     const group = d.buttons.filter(isGroup);
     cs.push(['主按钮唯一（非通用组按钮恰 1 个）', nonGroup.length === 1, nonGroup.map(b => b.text).join('|') || '∅']);
     const depBtn = nonGroup[0];
-    cs.push(['主按钮文案∈{部署引擎,安装 OCR,安装 H3}', !!depBtn && /部署引擎|安装 OCR|安装 H3/.test(depBtn.text), depBtn ? depBtn.text : '∅']);
+    cs.push(['主按钮文案=部署引擎（t31 统一，恒文案）', !!depBtn && depBtn.text === '部署引擎', depBtn ? depBtn.text : '∅']);
     const exp = ['隧道', '详情', '日志', '回收', '删除'];
     cs.push(['通用组恰 5 个且顺序 隧道→详情→日志→回收→删除', group.length === 5 && group.every((b, i) => new RegExp(exp[i]).test(b.text)), group.map(b => b.text).join('→') || '∅']);
     cs.push(['无「停止」按钮', !d.buttons.some(b => /停止/.test(b.text)), d.buttons.map(b => b.text).join('|')]);
