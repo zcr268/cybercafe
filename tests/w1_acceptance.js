@@ -276,37 +276,64 @@ const interaction = {};
     await shot('w1-cascade');
   }
 
-  // F5：通用组「详情/日志」真实点击（计入门禁）
+  // F5：通用组「详情/日志」真实点击（计入门禁；F6b：按 w1-运行中 行内定位按钮，不再 nth=0 全局首行）
   if (!rid) {
     cs.push(['F5 通用组真实点击（run 设备未取得，无法执行）', false, '']);
   } else {
     const fold = {};
+    // 行内定位：按 hostname 找主行（过滤 detail_ 折叠行），取该行内 详情/日志 按钮中心坐标，CDP 真实鼠标点击（兜底 DOM click）
+    const clickRunBtn = async (label) => {
+      const hit = await js(`(() => {
+        const rows = [...document.querySelectorAll('#devRows tr')].filter(tr => !(tr.id || '').startsWith('detail_'));
+        const tr = rows.find(x => x.children[0] && x.children[0].textContent.includes('w1-运行中'));
+        if (!tr) return null;
+        const b = [...tr.querySelectorAll('button')].find(x => x.textContent.trim() === ${JSON.stringify(label)});
+        if (!b) return null;
+        b.scrollIntoView({ block: 'center' });
+        const r = b.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), text: b.textContent.trim() };
+      })()`);
+      if (!hit) return '未找到(w1-运行中/' + label + ')';
+      try {
+        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: hit.x, y: hit.y, button: 'left', clickCount: 1 });
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hit.x, y: hit.y, button: 'left', clickCount: 1 });
+        return 'cdp点击:' + hit.text;
+      } catch (e) {
+        await js(`(() => {
+          const rows = [...document.querySelectorAll('#devRows tr')].filter(tr => !(tr.id || '').startsWith('detail_'));
+          const tr = rows.find(x => x.children[0] && x.children[0].textContent.includes('w1-运行中'));
+          [...tr.querySelectorAll('button')].find(x => x.textContent.trim() === ${JSON.stringify(label)}).click();
+          return true;
+        })()`);
+        return 'js点击兜底:' + label;
+      }
+    };
     try {
-      await click('text=详情 >> nth=0', { label: '点击详情' });
+      fold.detailClick = await clickRunBtn('详情');
       fold.detail = await js(`(async () => {
         const id = ${JSON.stringify(rid)};
         const el = document.getElementById('detail_' + id);
         const t0 = Date.now();
         while (Date.now() - t0 < 8000) {
-          if (el && el.style.display === '') return '展开';
+          if (el && getComputedStyle(el).display !== 'none') return '展开';
           await new Promise(r => setTimeout(r, 300));
         }
         return el ? '未展开(det存在)' : '未展开(det未挂载)';
       })()`);
-      await click('text=日志 >> nth=0', { label: '点击日志' });
+      fold.logClick = await clickRunBtn('日志');
       await wait(1);
       fold.logTab = await js(`(() => {
         const id = ${JSON.stringify(rid)};
         const b = document.getElementById('tabB_' + id + '_body');
-        return b ? (b.style.display === '' ? '日志tab激活' : '未激活') : '无tabB';
+        return b ? (getComputedStyle(b).display !== 'none' ? '日志tab激活' : '未激活') : '无tabB';
       })()`);
-      cs.push(['F5 真实点击「详情」→ 折叠展开', fold.detail === '展开', fold.detail + ' / logTab=' + fold.logTab]);
-      cs.push(['F5 真实点击「日志」→ 日志tab激活', fold.logTab === '日志tab激活', fold.logTab]);
+      cs.push(['F5 真实点击「详情」→ 折叠展开', fold.detail === '展开', fold.detail + '（' + fold.detailClick + '）']);
+      cs.push(['F5 真实点击「日志」→ 日志tab激活', fold.logTab === '日志tab激活', fold.logTab + '（' + fold.logClick + '）']);
       cs.push(['F5 真实点击执行无异常', true, 'ok']);
-      actions.push('F5 通用组真实点击 详情/日志：' + JSON.stringify(fold));
+      actions.push('F5 通用组行内定位真实点击 详情/日志：' + JSON.stringify(fold));
       await shot('w1-ops-detail');
       // 收起折叠，避免遮挡后续截图
-      await js(`(() => { const id = ${JSON.stringify(rid)}; const el = document.getElementById('detail_' + id); if (el && el.style.display === '') el.style.display = 'none'; return true; })()`);
+      await js(`(() => { const id = ${JSON.stringify(rid)}; const el = document.getElementById('detail_' + id); if (el && getComputedStyle(el).display !== 'none') el.style.display = 'none'; return true; })()`);
     } catch (e) {
       fold.clickError = String(e && e.message || e);
       cs.push(['F5 真实点击 详情/日志 执行异常', false, fold.clickError]);
@@ -319,7 +346,7 @@ const interaction = {};
     pass: cs.every(c => c[1]), checks: cs });
 }
 
-// A3 状态色板（含 卸载中=琥珀降级）
+// A3 状态色板（含 卸载中=琥珀降级；F6a：期望色族取 colorFamily 返回域内 'amber'，降级由附加校验判定）
 {
   const dDeploy = describe.deploy;
   const deployBadge = dDeploy && dDeploy.found ? badgesOf(dDeploy.statusEl).find(b => WORDS_BY_KEY.deploying.includes(b.text)) : undefined;
@@ -332,14 +359,16 @@ const interaction = {};
     const sb = badgesOf(d.statusEl).find(b => WORDS_BY_KEY[sc.state].includes(b.text));
     if (!sb) { cs.push([sc.key + '(' + sc.state + ') 状态徽章未找到', false, 'badges=' + badgesOf(d.statusEl).map(b => b.text).join('|')]); continue; }
     const fam = colorFamily(sb.bg);
-    let ok = fam === sc.family;
-    let note = sc.state + '→' + fam + '（bg=' + sb.bg + '）';
+    // F6a：卸载中 family 期望='amber'（colorFamily 永不返回 'amber-degraded'），降级呈现由 degraded 校验判定
+    const want = sc.state === 'uninstalling' ? 'amber' : sc.family;
+    let ok = fam === want;
+    let note = sc.state + '→' + fam + '（期望=' + want + '，bg=' + sb.bg + '）';
     if (sc.state === 'uninstalling') {
       const degraded = deployBg && sb.bg !== deployBg && lum(sb.bg) <= lum(deployBg);
       ok = ok && degraded;
-      note += ' 部署中bg=' + deployBg + ' 亮度差=' + (lum(sb.bg) - lum(deployBg)).toFixed(0);
+      note += ' 降级校验: 与部署中bg相异=' + (deployBg && sb.bg !== deployBg) + ' 亮度差=' + (lum(sb.bg) - lum(deployBg)).toFixed(0) + '（部署中bg=' + deployBg + '）';
     }
-    cs.push([sc.key + '(' + sc.state + ') 色板=' + sc.family, ok, note]);
+    cs.push([sc.key + '(' + sc.state + ') 色板=' + (sc.state === 'uninstalling' ? 'amber+降级' : sc.family), ok, note]);
   }
   results.push({ id: 'A3', name: '状态色板统一（运行中=绿/部署中=琥珀/排队=蓝/已停止或闲置=灰/失败=红/卸载中=琥珀降级）',
     pass: cs.every(c => c[1]), checks: cs });

@@ -59,11 +59,15 @@ ego-browser nodejs < tests/w1_acceptance.js
   图生文：引擎=[OCR]、档位含 rapidocr、主按钮=安装 OCR；文生视频：引擎=[H3]、档位含 h3 档、主按钮=安装 H3；
   切回文生文：主按钮=部署引擎、引擎恢复多选。全部计入 A2 门禁 verdicts（机器可判定，杜绝假阴性）。
 - F5（门禁断言）：真实点击「详情」须展开折叠、「日志」须切到日志 tab；点击异常/未展开均判 FAIL。
+  F6b：点击按 <code>w1-运行中</code> 行内定位该行 详情/日志 按钮（CDP 真实鼠标点击，坐标取自
+  button.getBoundingClientRect；CDP 不可用时 DOM click 兜底）——不使用 nth=0 全局定位（后端按心跳排序，
+  运行行不保证在 DOM 首位）。
 
 ### A3｜状态色板统一
 状态徽章 computed background 按语义映射色族：
 运行中→绿、部署中→琥珀、排队→蓝、已停止/闲置→灰、失败→红；
-卸载中→琥珀**降级**（琥珀色族，且与「部署中」琥珀*不同*：背景色相异、亮度不高于部署中）。
+卸载中→琥珀**降级**（F6a：断言期望 family 取 <code>amber</code>——colorFamily 返回域内值，
+「降级」由独立附加校验判定：<code>bg 与部署中相异 且 lum ≤ 部署中 bg</code>，保证机器可判定且真实反映「琥珀降级」语义）。
 色族判定（与 `w1_acceptance.js` `colorFamily()` 实现逐字一致，F4 对齐；按优先级判定，命中即止）：
 1. dark：r/g/b 全通道 < 50；
 2. gray：|r−g| < 30 且 |g−b| < 30；
