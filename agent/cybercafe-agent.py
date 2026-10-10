@@ -11,7 +11,7 @@ CyberCafe 本地控制脚本（agent）
 
 API_BASE = "__API_BASE__"       # 云管理端地址（安装/下载时由云端注入）
 DEVICE_KEY = "__DEVICE_KEY__"   # 设备密钥（安装时注入）
-VERSION = "0.7.0"
+VERSION = "0.7.2"
 
 HEARTBEAT_INTERVAL = 10         # 默认心跳间隔（秒），实际由云端 poll_after 驱动
 DEPLOY_HEARTBEAT_INTERVAL = 15  # 部署中最长上报间隔（秒）
@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.request
@@ -599,6 +600,11 @@ def heartbeat(extra=None):
     # OCR installed 常驻），deploy.state 与 components.* 一致；引擎 deploy 仍走 L3 上报
     if _component_deploy:
         payload["device"]["deploy"] = dict(_component_deploy)
+    if _async_busy():
+        # t112：心跳带 busy/working 标记（云端放宽离线阈值兜底 + UI 忙提示）
+        payload["device"]["busy"] = True
+        payload["device"]["busy_type"] = _async_busy_type() or ""
+        payload["device"]["busy_since"] = int(_async_state["since"])
     if extra:
         payload["device"].update(extra)
     st, js, raw = http("POST", "/api/device/heartbeat", payload)
@@ -884,6 +890,30 @@ def _fetch_ocr(script_name, out_path, mode=0o755):
     _atomic_write(out_path, src, mode)
     return src
 
+def _ensure_docker_prep(name):
+    """t106：组件 docker-prep 运行时兜底——部署前检测（标记/镜像），缺失临时执行。
+    标记 /opt/cybercafe/docker-prep.<name>.done 在位 → 零动作跳过；
+    脚本不存在（L1 未落位/未入库）→ 跳过（B 脚本现场构建兜底）；
+    脚本存在且未就绪 → 临时执行（幂等，完成写标记）。"""
+    prep_dir = "/opt/cybercafe/docker-prep"
+    marker = "/opt/cybercafe/docker-prep.%s.done" % name
+    script = os.path.join(prep_dir, "docker-prep.%s.sh" % name)
+    if os.path.isfile(marker):
+        log("docker-prep %s 已就绪（标记在位），零动作跳过" % name)
+        return 0
+    if not os.path.isfile(script):
+        log("docker-prep %s 脚本不存在（L1 未落位/未入库），跳过" % name)
+        return 0
+    log("t106 运行时兜底：%s 未 docker-prep，临时执行 %s" % (name, script))
+    rc, out = run("bash %s" % script, timeout=2000)
+    if rc != 0:
+        import traceback
+        log(out[-800:])
+        raise RuntimeError("docker-prep %s 临时执行失败（rc=%d；重试/手动可补，安装中止）" % (name, rc))
+    log("docker-prep %s 已就绪（临时执行完成）" % name)
+    return 0
+
+
 def run_ocr(action):
     """OCR 安装/卸载：云端拉取 install.sh/ocr.py/uninstall.sh → 校验 → 执行 → 状态回传。
     与 L3 同纪律：拉不到/校验不过 → 如实 fail，绝不静默成功。"""
@@ -892,7 +922,9 @@ def run_ocr(action):
     src_dir = "/opt/cybercafe-ocr-src"  # 脚本源目录（与 OCR_DIR 分离：install.sh 用
     #  cp 装 ocr.py 到 OCR_DIR，若 SCRIPT_DIR==OCR_DIR 会 cp 同文件触发 set -e 中止）
     os.makedirs(src_dir, exist_ok=True)
+    os.makedirs(ocr_dir, exist_ok=True)   # t112：防御——install 日志重定向需 OCR_DIR 在（机器被手动清除后防崩）
     if action == "install":
+        _ensure_docker_prep("ocr")          # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_ocr("ocr/ocr.py", src_dir + "/ocr.py")
         _fetch_ocr("ocr/install.sh", src_dir + "/install.sh")
         st = {"state": "installing", "ts": int(time.time())}
@@ -947,6 +979,9 @@ _h3_marker = "/opt/minimax-h3/.version"
 _H3_DIR = "/opt/minimax-h3"           # 安装目标（权重/编译产物/日志；模块级常量便于沙箱覆盖）
 _H3_SRC_DIR = "/opt/cybercafe-h3-src" # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
 _H3_ACTIONS = ("install", "uninstall", "start", "stop", "status")
+# t108：UI 档位（三列级联 h3-fast/h3-hd）→ 实际量化（已验证 GGUF 集；快档=最速默认档，
+# 高清=16GB 卡最优已验证档 Q4_K_M；q8 无已验证产物不引入——如实标注）
+_H3_TIERS = {"h3-fast": "UD-Q2_K_XL", "h3-hd": "Q4_K_M"}
 
 def _h3_state():
     """components.h3：读本机 H3 安装状态标记（install.sh 子命令/主流程写 .version）。"""
@@ -966,15 +1001,20 @@ def _fetch_h3(script_name, out_path, mode=0o755):
     _atomic_write(out_path, src, mode)
     return src
 
-def run_h3(action):
+def run_h3(action, option=None):
     """H3 安装/卸载/启停：云端拉取 minimax-h3 脚本 → 校验 → 执行 → .version 状态回传。
+    option（t108）：h3-fast/h3-hd 档位 → H3_QUANT env 传入 install.sh（缺省=None=默认档并如实标注）。
     install/uninstall 走主流程；start/stop/status 走 install.sh 子命令。
     与 L3/OCR 同纪律：拉不到/校验不过/执行失败 → 如实 fail，绝不静默成功。"""
     import json as _json
+    if option is not None and option not in _H3_TIERS:
+        log("run_h3: option 非法（%s），按默认档处理并如实标注" % option)
+        option = None                      # t108 防御：档位于此归一化，deploy 槽 tier 不漂移
     h3_dir = _H3_DIR
     src_dir = _H3_SRC_DIR                  # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
     os.makedirs(src_dir, exist_ok=True)
     if action == "install":
+        _ensure_docker_prep("h3")           # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_h3("minimax-h3/install.sh", src_dir + "/install.sh")
         st = {"state": "installing", "ts": int(time.time())}
         _atomic_write(_h3_marker, _json.dumps(st))
@@ -983,7 +1023,11 @@ def run_h3(action):
         # 用 PIPE 捕获会因服务存活导致 run() 挂到超时（与 OCR 同陷阱，t71 已修）
         logp = h3_dir + "/h3-install.log"
         os.makedirs(h3_dir, exist_ok=True)
-        rc, out = run("bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=1800)
+        # t108：档位→量化——H3_QUANT env 注入（install.sh 已支持；.version 落 quant 供心跳/UI）
+        qenv = ("H3_QUANT=%s " % _H3_TIERS[option]) if (option and option in _H3_TIERS) else ""
+        if not qenv:
+            log("H3 档位缺省（未选/非法），使用 install.sh 默认档并如实标注 tier=default")
+        rc, out = run(qenv + "bash " + src_dir + "/install.sh > " + logp + " 2>&1", timeout=1800)
         if rc != 0:
             try:
                 tail = open(logp).read()[-300:]
@@ -997,7 +1041,9 @@ def run_h3(action):
         # t78：H3 安装后若已在运行 → 建机器隧道（11435 OpenAI 兼容）暴露
         url = _start_component_tunnel(11435) if st.get("state") == "running" else None
         _set_component_deploy({"type": "h3", "state": st.get("state", "installed"),
-                               "version": st.get("version"), "tunnel_url": url,
+                               "version": st.get("version"),
+                               "quant": st.get("quant") or (_H3_TIERS.get(option) if option else None),
+                               "tier": option or "default", "tunnel_url": url,
                                "ts": int(time.time())})
         report_progress("h3", "ok", "H3 安装完成（" + str(st.get("state", "?")) + "）")
         return 0
@@ -1031,7 +1077,9 @@ def run_h3(action):
             # t78：H3 启动后建机器隧道（11435 OpenAI 兼容 /v1/models，可直接聊天）
             url = _start_component_tunnel(11435)
             _set_component_deploy({"type": "h3", "state": "running",
-                                   "version": st.get("version"), "tunnel_url": url,
+                                   "version": st.get("version"),
+                                   "quant": st.get("quant"), "tier": "default",
+                                   "tunnel_url": url,
                                    "ts": int(time.time())})
         elif action == "stop":
             _stop_tunnel()
@@ -1241,10 +1289,61 @@ def _ensure_disk_before_deploy(engine, model):
     report_progress("disk", "ok" if ok else "fail", detail)
     return (ok, free1, freed, items)
 
+# t112：耗时指令异步化——主循环只做心跳+poll，长指令（引擎部署/OCR/H3/recycle）由后台 worker 执行，
+# 心跳持续保活不被阻塞（不再因 35s 无心跳被云端误判离线）；单槽互斥：busy 期间新长指令如实拒绝，
+# 失败如实上报（deploy.state=failed），互斥清理（_stop_other_deployments）沿用既有链路。
+_LONG_CMDS = ("deploy", "recycle", "ocr", "h3")
+_async_state = {"busy": False, "type": None, "since": 0.0}
+_async_lock = threading.Lock()
+
+def _async_busy():
+    with _async_lock:
+        return bool(_async_state["busy"])
+
+def _async_busy_type():
+    with _async_lock:
+        return _async_state["type"]
+
+def _async_mark(ctype):
+    with _async_lock:
+        _async_state.update(busy=True, type=ctype, since=time.time())
+
+def _async_idle():
+    with _async_lock:
+        _async_state.update(busy=False, type=None, since=0.0)
+
+def _async_worker(cmd):
+    try:
+        _exec_command(cmd)
+    except Exception as e:
+        # t112 终止路径：异步任务异常如实上报（不静默丢）——progress fail + deploy.state=failed
+        log("异步任务异常: %s" % e)
+        traceback.print_exc()
+        report_progress("command", "fail", "异步任务异常: %s" % str(e)[:200])
+        report_deploy_result(False, engine=cmd.get("engine", ""), model=cmd.get("model", ""))
+    finally:
+        _async_idle()
+
 def handle_command(cmd):
     ctype = cmd.get("type")
     action = cmd.get("action", "")
     log("收到指令: %s" % json.dumps(cmd, ensure_ascii=False))
+    if ctype in _LONG_CMDS:
+        if _async_busy():
+            # t112 并发安全：单槽互斥——busy 期间新长指令如实拒绝（不排队不乱跑）
+            log("设备忙（正在执行 %s），拒绝并发长指令 %s" % (_async_busy_type(), ctype))
+            report_progress("command", "fail",
+                "设备忙（正在执行 %s），请完成后再试" % (_async_busy_type() or "长任务"))
+            return
+        _async_mark(ctype)
+        log("t112 长指令 %s 异步执行（主循环继续心跳保活）" % ctype)
+        threading.Thread(target=_async_worker, args=(cmd,), daemon=True).start()
+        return
+    # 短指令（stop/restart_tunnel 等）同步执行，行为不变
+    _exec_command(cmd)
+
+def _exec_command(cmd):
+    ctype = cmd.get("type")
     try:
         if ctype in ("deploy", "stop", "restart_tunnel"):
             if ctype == "deploy":
@@ -1295,10 +1394,14 @@ def handle_command(cmd):
             action = cmd.get("action", "install")
             if action not in _H3_ACTIONS:
                 raise RuntimeError("未知 H3 action: %s" % action)
+            option = cmd.get("option")              # t108：档位全链传递（h3-fast/h3-hd）
+            if option is not None and option not in _H3_TIERS:
+                log("H3 指令 option 非法（%s），按默认档处理" % option)
+                option = None
             if action in ("install", "start"):
                 _stop_other_deployments("h3")       # t78 唯一部署互斥：H3 安装/启动前停引擎/OCR
-            report_progress("h3", "running", "H3 指令: %s" % action)
-            rc = run_h3(action)
+            report_progress("h3", "running", "H3 指令: %s%s" % (action, ("（" + option + "）") if option else ""))
+            rc = run_h3(action, option)
             if rc != 0:
                 report_progress("h3", "fail", "H3 %s 失败（rc=%d）" % (action, rc))
             else:

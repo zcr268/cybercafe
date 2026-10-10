@@ -35,6 +35,7 @@
   .state.queued { background: #1e3a8a; color: #93c5fd; }
   .state.idle, .state.stopped, .state.offline { background: #334155; color: #cbd5e1; }
   .state.uninstalling { background: #451a03; color: #fbbf24; }
+  .state.busy { background: #78350f; color: #fbbf24; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #0e7490; color: #cffafe; }
   .note { font-size: 12px; color: #94a3b8; }
   #login { max-width: 360px; margin: 15vh auto; }
@@ -470,6 +471,13 @@ function oneLiner(d) {
   const parts = [];
   if (dep.version) parts.push("v" + dep.version);
   if (dep.detail) parts.push(dep.detail);
+  if (targetName(d) === "H3" || dep.type === "h3") {
+    // H3 档位标注（t108/t111 移植）：dep.quant/tier 优先，旧部署用 components.h3.quant 兜底推导
+    const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
+    const t = (dep.tier && dep.tier !== "default") ? dep.tier
+      : (q === "Q4_K_M" ? "h3-hd" : q === "UD-Q2_K_XL" ? "h3-fast" : "");
+    if (t) parts.push(t + (q ? ` (${q})` : ""));
+  }
   if (parts.length) return parts.join(" · ");
   if (st === "queued") return "等待调度";
   if (st === "failed") return "部署失败";
@@ -491,9 +499,10 @@ function statusCardHtml(d, dep) {
   const m = CARD_STATES[st] || { text: "闲置", cls: "idle" };
   const name = targetName(d);
   const nameTxt = (name !== "未部署" && dep.model) ? name + " · " + dep.model : name;
+  const busy = d.busy === true ? ` <span class="state busy">忙（${esc(d.busy_type || "部署中")}）</span>` : "";
   const tunnel = safeUrl(dep.tunnel_url)
     ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : "";
-  return `<span class="badge">${esc(nameTxt)}</span> <span class="state ${m.cls}">${m.text}</span>${progressHtml(d)}<span class="note">${esc(oneLiner(d))}</span>${tunnel}`;
+  return `<span class="badge">${esc(nameTxt)}</span> <span class="state ${m.cls}">${m.text}</span>${busy}${progressHtml(d)}<span class="note">${esc(oneLiner(d))}</span>${tunnel}`;
 }
 
 function buildRowCells(d) {
@@ -506,7 +515,18 @@ function buildRowCells(d) {
     const drv = ((d.usage || {}).gpu_driver) || d.gpu_driver || null;
     const drvLine = drv != null ? `驱动 ${esc(drv)}` : "";
     const hw = [hwBase, netRows, extIp, hwSrc, drvLine].filter(Boolean).join("<br>");
-    const usage = d.online === true ? usageBars(d.usage || {}) : "";
+const usage = d.online === true ? usageBars(d.usage || {}) : "";
+    // 驱动兼容徽章（strata/ollama 按驱动版本实时判定，随硬件列展示）
+    const drvNum = drv != null ? parseFloat(drv) : null;
+    const drvBadges = ["strata", "ollama"].map(en => {
+      const min = en === "strata" ? 580 : 550;
+      if (drvNum == null) return `<span class="badge">${en} ?</span>`;
+      const ok = drvNum >= min;
+      const tip = en === "strata"
+        ? (ok ? "" : `需驱动 ≥${min}，当前 ${drv}`)
+        : (ok ? "" : "低于 550 会退化 CPU");
+      return `<span class="badge" title="${esc(tip)}">${en} ${ok ? "✓" : (en === "strata" ? "✗" : "⚠")}</span>`;
+    }).join(" ");
     const ly = d.layers || {};
     const lyLine = (ly.install || ly.provision || ly.agent)
       ? `<div style="font-size:11px;color:#64748b;margin-top:2px">L1 v${esc((ly.install||{}).version||"—")} · v${esc((ly.provision||{}).version||"—")} · L2 v${esc((ly.agent||{}).version||"—")}${ly.channel ? ` · 通道 ${esc(ly.channel)}` : ""}</div>` : "";
@@ -514,7 +534,7 @@ function buildRowCells(d) {
       `<span class="dot ${d.online === true ? "on" : "off"}"></span><b>${esc(d.hostname||"-")}</b>
           ${d.batch ? `<span class="state idle">批次 ${esc(d.batch)}</span>` : ""}<br>
           <span class="mono" style="color:#64748b">${d.device_id} · agent v${esc(d.agent_version||"?")} · ${ago(d.last_seen)}</span>${lyLine}`,
-      `${hw || "-"}${usage}`,
+      `${hw || "-"}${drvBadges ? "<br>" + drvBadges : ""}${usage}`,
       statusCardHtml(d, dep),
       `<div class="row">${cascadeHtml(d, dep)}
         <button class="sm gray" onclick="cmd('${d.device_id}','restart_tunnel')">隧道</button>
@@ -587,6 +607,12 @@ function chatLabel(d) {
 // chatLabel 已在 fix(regression) 6499188 恢复；此处恢复 updateChatMode（t89 三形态语义）。
 function updateChatMode(d) {
   const dep = (d && d.deploy) || null;
+  const did = (d && d.device_id) || null;
+  // t110：切设备/页面加载 → 清空并从存储恢复该设备历史；同一设备轮询重渲染不重建（保护在途 DOM）
+  if (did !== chatCurDev) {
+    chatCurDev = did;
+    if (did) chatRender(did); else $("chatbox").innerHTML = "";
+  }
   const isOcr = !!(dep && dep.type === "ocr");
   const isVid = !!(dep && dep.type === "h3");
   $("ocrIn").style.display = isOcr ? "" : "none";
@@ -676,7 +702,7 @@ window.cascadeDeploy = async id => {
   const st = cascadeState(id);
   cascadeSel[id] = st;   // 部署后保持所选（fp 稳定）
   if (st.type === "ocr") { await ocrCmd(id, "install"); return; }
-  if (st.type === "h3") { await h3Cmd(id, "install"); return; }
+  if (st.type === "h3") { await h3Cmd(id, "install", st.option || "h3-fast"); return; }   // t108：档位不丢
   const model = st.option;
   if (!confirm(`在设备 ${id} 上部署 ${st.engine} · ${model}？`)) return;
   try { await api("/api/admin/deploy", { method: "POST", body: JSON.stringify({ device_id: id, engine: st.engine, model }) });
@@ -732,6 +758,8 @@ window.vidSend = async () => {
   const w = parseInt($("vidW").value) || 480;
   const h = parseInt($("vidH").value) || 280;
   const steps = parseInt($("vidSteps").value) || 20;
+  // t109：计时起点=点击生成（提交 vid_gen 前）——终用时含排队+生成，进度与终值同源
+  const t0 = performance.now();
   addMsg("user", "🎬 " + prompt + `（${w}×${h} · ${frames}帧 · ${steps}步）`);
   const bot = addMsg("bot", "🎞 生成中…（H3 文生视频单次约 20s–13min，请耐心等待）");
   const payload = { prompt, width: w, height: h, video_frames: frames,
@@ -747,7 +775,7 @@ window.vidSend = async () => {
     bot.textContent = "🎞 生成中…（等待结果，可能需数分钟）";
     // 异步作业形态：{id,status} → 轮询 /sdcpp/v1/jobs/{id}
     if (data.id && data.status && data.status !== "completed" && data.status !== "failed") {
-      const jobId = data.id, t0 = performance.now();
+      const jobId = data.id;   // t109：t0 已上移到点击起点，进度/终值同源
       while (true) {
         await new Promise(res => setTimeout(res, 3000));
         const jr = await fetch(turl + "/sdcpp/v1/jobs/" + jobId).catch(() => null);
@@ -761,7 +789,11 @@ window.vidSend = async () => {
     const vid = extractVideo(data);
     if (!vid) throw new Error("未取到视频结果: " + JSON.stringify(data).slice(0, 160));
     bot.innerHTML = videoHtml(vid);
-  } catch (e) { bot.textContent = "错误: " + e.message; }
+    // t109：最终总用时（进度同源 t0；仅成功路径显示，失败不显示伪用时）
+    bot.innerHTML += '<div style="margin-top:8px;font-size:13px;color:#a5b4fc">⏱ 生成用时 ' +
+      ((performance.now() - t0) / 1000).toFixed(1) + 's（含排队+生成，起于点生成）</div>';
+    chatSaveDom(chatCurDev);                       // t110：终态持久化（视频降级为摘要）
+  } catch (e) { bot.textContent = "错误: " + e.message; chatSaveDom(chatCurDev); }   // t109：失败只报错，不显示伪用时
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 function fileToBase64(f) {
@@ -790,7 +822,8 @@ window.ocrSend = async () => {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.ok !== true) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
     bot.textContent = j.text || "(未识别到文字)";
-  } catch (e) { bot.textContent = "错误: " + e.message; }
+    chatSaveDom(chatCurDev);                       // t110：终态持久化
+  } catch (e) { bot.textContent = "错误: " + e.message; chatSaveDom(chatCurDev); }
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 window.ocrCmd = async (id, action) => {
@@ -798,10 +831,10 @@ window.ocrCmd = async (id, action) => {
         toast("OCR 指令已下发: " + action); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
-window.h3Cmd = async (id, action) => {
+window.h3Cmd = async (id, action, option) => {
   if (action === "uninstall" && !confirm(`在设备 ${id} 上卸载 H3（删除全部权重/编译产物/日志，约 27GB）？`)) return;
-  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "h3", action }) });
-        toast("H3 指令已下发: " + action); viewLog(id); setTimeout(refresh, 1000); }
+  try { await api("/api/admin/command", { method: "POST", body: JSON.stringify({ device_id: id, type: "h3", action, ...(option ? { option } : {}) }) });
+        toast("H3 指令已下发: " + action + (option ? "（" + option + "）" : "")); viewLog(id); setTimeout(refresh, 1000); }
   catch (e) { toast(e.message, false); }
 };
 window.cmd = async (id, type) => {
@@ -821,6 +854,8 @@ window.delDev = async id => {
     await api("/api/admin/device/" + id, { method: "DELETE" });
     if (expandedDevs.has(id)) expandedDevs.delete(id);
     if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
+    chatClear(id);                                 // t110：设备删除清理该设备聊天历史（不留孤儿）
+    if (chatCurDev === id) { chatCurDev = null; $("chatbox").innerHTML = ""; }
     refresh();
   } catch (e) { toast(e.message, false); }
 };
@@ -968,12 +1003,59 @@ function safeUrl(u) {
     return (p.protocol === "https:" || p.protocol === "http:") ? String(u) : "";
   } catch { return ""; }
 }
+// t110：聊天历史持久化——localStorage 按设备分存（key=dev:<device_id>），刷新/重开自动回溯；
+// 在途消息（生成中/识别中/流式首块未到）保留为 inflight，刷新后显示『上次生成中…（提示词与参数已保留）』；
+// 容量：每设备 ≤MSG_MAX_PER_DEV 条、每条 ≤MSG_MAX_CHARS 字符，超限裁剪最旧；视频 b64 过大降级为摘要。
+const MSG_STORE_KEY = "cc_chat_msgs_v1";
+const MSG_MAX_PER_DEV = 100, MSG_MAX_CHARS = 2000;
+const MSG_INFLIGHT_RE = /生成中|识别中|等待结果|采样较久/;
+let chatCurDev = null;               // 当前 chatbox 展示的设备（恢复/切换判定）
+function chatLoad() { try { return JSON.parse(localStorage.getItem(MSG_STORE_KEY)) || {}; } catch (e) { return {}; } }
+function chatSave(all) { try { localStorage.setItem(MSG_STORE_KEY, JSON.stringify(all)); } catch (e) { /* 存储满静默降级内存态 */ } }
+function chatGet(devId) { return chatLoad()["dev:" + devId] || []; }
+function chatTrim(msgs) {
+  let out = msgs.slice(-MSG_MAX_PER_DEV);           // 条数上限：裁剪最旧
+  for (const m of out) if (m.html && m.html.length > MSG_MAX_CHARS) m.html = m.html.slice(0, MSG_MAX_CHARS) + "…";
+  return out;
+}
+function chatSaveDom(devId) {
+  // 从 chatbox DOM 重建该设备历史（终态一致性来源：统一按 innerHTML 存储）
+  if (!devId) return;
+  const box = $("chatbox"); if (!box) return;
+  const msgs = [];
+  for (const el of box.children) {
+    if (!el.classList || !el.classList.contains("msg")) continue;
+    let html = el.innerHTML || "";
+    if (html.indexOf("data:video") >= 0) {          // 视频 b64 过大：降级为摘要（防存储膨胀）
+      const tl = (html.match(/⏱[^<]*/g) || [""])[0];
+      html = "<span>🎞 视频结果（体积过大未持久化）" + (tl ? " · " + tl : "") + "</span>";
+    }
+    msgs.push({ role: el.classList.contains("user") ? "user" : "bot",
+                html: html.slice(0, MSG_MAX_CHARS),
+                ts: Date.now(),
+                inflight: !el.classList.contains("user") && MSG_INFLIGHT_RE.test(el.textContent || "") });
+  }
+  const all = chatLoad(); all["dev:" + devId] = chatTrim(msgs); chatSave(all);
+}
+function chatClear(devId) { const all = chatLoad(); delete all["dev:" + devId]; chatSave(all); }
+function chatRender(devId) {
+  const box = $("chatbox"); if (!box) return;
+  box.innerHTML = "";
+  for (const m of chatGet(devId)) {
+    const d = document.createElement("div");
+    d.className = "msg " + (m.role === "user" ? "user" : "bot");
+    d.innerHTML = m.inflight ? "⏳ 上次生成中…（刷新前仍在生成；提示词与参数已保留）" : (m.html || "");
+    box.appendChild(d);
+  }
+  box.scrollTop = box.scrollHeight;
+}
 function addMsg(role, text) {
   const d = document.createElement("div");
   d.className = "msg " + (role === "user" ? "user" : "bot");
   d.textContent = text;
   $("chatbox").appendChild(d);
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
+  if (chatCurDev) chatSaveDom(chatCurDev);   // t110：消息追加即持久化（含在途初始态）
   return d;
 }
 // 聊天性能实测（四引擎通用，SSE 流式统一口径）：
@@ -1085,8 +1167,10 @@ async function send() {
     };
     bot.textContent = content;
     perfLine(bot, j);
+    chatSaveDom(chatCurDev);                       // t110：终态持久化
   } catch (e) {
     bot.textContent = "❌ " + (e.name === "AbortError" ? "请求超时（300s），请确认设备在线且隧道存活" : e.message);
+    chatSaveDom(chatCurDev);                       // t110：失败态持久化（错误留痕）
   } finally {
     clearTimeout(timer);
   }
