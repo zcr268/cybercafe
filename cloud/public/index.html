@@ -564,6 +564,12 @@ function chatLabel(d) {
 // chatLabel 已在 fix(regression) 6499188 恢复；此处恢复 updateChatMode（t89 三形态语义）。
 function updateChatMode(d) {
   const dep = (d && d.deploy) || null;
+  const did = (d && d.device_id) || null;
+  // t110：切设备/页面加载 → 清空并从存储恢复该设备历史；同一设备轮询重渲染不重建（保护在途 DOM）
+  if (did !== chatCurDev) {
+    chatCurDev = did;
+    if (did) chatRender(did); else $("chatbox").innerHTML = "";
+  }
   const isOcr = !!(dep && dep.type === "ocr");
   const isVid = !!(dep && dep.type === "h3");
   $("ocrIn").style.display = isOcr ? "" : "none";
@@ -743,7 +749,8 @@ window.vidSend = async () => {
     // t109：最终总用时（进度同源 t0；仅成功路径显示，失败不显示伪用时）
     bot.innerHTML += '<div style="margin-top:8px;font-size:13px;color:#a5b4fc">⏱ 生成用时 ' +
       ((performance.now() - t0) / 1000).toFixed(1) + 's（含排队+生成，起于点生成）</div>';
-  } catch (e) { bot.textContent = "错误: " + e.message; }   // t109：失败只报错，不显示伪用时
+    chatSaveDom(chatCurDev);                       // t110：终态持久化（视频降级为摘要）
+  } catch (e) { bot.textContent = "错误: " + e.message; chatSaveDom(chatCurDev); }   // t109：失败只报错，不显示伪用时
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 function fileToBase64(f) {
@@ -772,7 +779,8 @@ window.ocrSend = async () => {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.ok !== true) throw new Error("HTTP " + r.status + " " + JSON.stringify(j).slice(0, 200));
     bot.textContent = j.text || "(未识别到文字)";
-  } catch (e) { bot.textContent = "错误: " + e.message; }
+    chatSaveDom(chatCurDev);                       // t110：终态持久化
+  } catch (e) { bot.textContent = "错误: " + e.message; chatSaveDom(chatCurDev); }
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 };
 window.ocrCmd = async (id, action) => {
@@ -803,6 +811,8 @@ window.delDev = async id => {
     await api("/api/admin/device/" + id, { method: "DELETE" });
     if (expandedDevs.has(id)) expandedDevs.delete(id);
     if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
+    chatClear(id);                                 // t110：设备删除清理该设备聊天历史（不留孤儿）
+    if (chatCurDev === id) { chatCurDev = null; $("chatbox").innerHTML = ""; }
     refresh();
   } catch (e) { toast(e.message, false); }
 };
@@ -950,12 +960,59 @@ function safeUrl(u) {
     return (p.protocol === "https:" || p.protocol === "http:") ? String(u) : "";
   } catch { return ""; }
 }
+// t110：聊天历史持久化——localStorage 按设备分存（key=dev:<device_id>），刷新/重开自动回溯；
+// 在途消息（生成中/识别中/流式首块未到）保留为 inflight，刷新后显示『上次生成中…（提示词与参数已保留）』；
+// 容量：每设备 ≤MSG_MAX_PER_DEV 条、每条 ≤MSG_MAX_CHARS 字符，超限裁剪最旧；视频 b64 过大降级为摘要。
+const MSG_STORE_KEY = "cc_chat_msgs_v1";
+const MSG_MAX_PER_DEV = 100, MSG_MAX_CHARS = 2000;
+const MSG_INFLIGHT_RE = /生成中|识别中|等待结果|采样较久/;
+let chatCurDev = null;               // 当前 chatbox 展示的设备（恢复/切换判定）
+function chatLoad() { try { return JSON.parse(localStorage.getItem(MSG_STORE_KEY)) || {}; } catch (e) { return {}; } }
+function chatSave(all) { try { localStorage.setItem(MSG_STORE_KEY, JSON.stringify(all)); } catch (e) { /* 存储满静默降级内存态 */ } }
+function chatGet(devId) { return chatLoad()["dev:" + devId] || []; }
+function chatTrim(msgs) {
+  let out = msgs.slice(-MSG_MAX_PER_DEV);           // 条数上限：裁剪最旧
+  for (const m of out) if (m.html && m.html.length > MSG_MAX_CHARS) m.html = m.html.slice(0, MSG_MAX_CHARS) + "…";
+  return out;
+}
+function chatSaveDom(devId) {
+  // 从 chatbox DOM 重建该设备历史（终态一致性来源：统一按 innerHTML 存储）
+  if (!devId) return;
+  const box = $("chatbox"); if (!box) return;
+  const msgs = [];
+  for (const el of box.children) {
+    if (!el.classList || !el.classList.contains("msg")) continue;
+    let html = el.innerHTML || "";
+    if (html.indexOf("data:video") >= 0) {          // 视频 b64 过大：降级为摘要（防存储膨胀）
+      const tl = (html.match(/⏱[^<]*/g) || [""])[0];
+      html = "<span>🎞 视频结果（体积过大未持久化）" + (tl ? " · " + tl : "") + "</span>";
+    }
+    msgs.push({ role: el.classList.contains("user") ? "user" : "bot",
+                html: html.slice(0, MSG_MAX_CHARS),
+                ts: Date.now(),
+                inflight: !el.classList.contains("user") && MSG_INFLIGHT_RE.test(el.textContent || "") });
+  }
+  const all = chatLoad(); all["dev:" + devId] = chatTrim(msgs); chatSave(all);
+}
+function chatClear(devId) { const all = chatLoad(); delete all["dev:" + devId]; chatSave(all); }
+function chatRender(devId) {
+  const box = $("chatbox"); if (!box) return;
+  box.innerHTML = "";
+  for (const m of chatGet(devId)) {
+    const d = document.createElement("div");
+    d.className = "msg " + (m.role === "user" ? "user" : "bot");
+    d.innerHTML = m.inflight ? "⏳ 上次生成中…（刷新前仍在生成；提示词与参数已保留）" : (m.html || "");
+    box.appendChild(d);
+  }
+  box.scrollTop = box.scrollHeight;
+}
 function addMsg(role, text) {
   const d = document.createElement("div");
   d.className = "msg " + (role === "user" ? "user" : "bot");
   d.textContent = text;
   $("chatbox").appendChild(d);
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
+  if (chatCurDev) chatSaveDom(chatCurDev);   // t110：消息追加即持久化（含在途初始态）
   return d;
 }
 // 聊天性能实测（四引擎通用，SSE 流式统一口径）：
@@ -1067,8 +1124,10 @@ async function send() {
     };
     bot.textContent = content;
     perfLine(bot, j);
+    chatSaveDom(chatCurDev);                       // t110：终态持久化
   } catch (e) {
     bot.textContent = "❌ " + (e.name === "AbortError" ? "请求超时（300s），请确认设备在线且隧道存活" : e.message);
+    chatSaveDom(chatCurDev);                       // t110：失败态持久化（错误留痕）
   } finally {
     clearTimeout(timer);
   }
