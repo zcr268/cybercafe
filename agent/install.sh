@@ -254,6 +254,24 @@ else
     echo "[cybercafe] ⚠️ 未找到 deploy/docker 目录（docker-prep 框架不落位；不影响 agent 主流程）" >&2
 fi
 
+# ---------- 3.6) 装机默认执行当下所有 docker-prep（t105：一次装齐源/toolkit/runtime/预构建镜像） ----------
+# 幂等：各 docker-prep 脚本内部均已幂等（已有源/已装 toolkit/已注册 runtime/镜像已存在均跳过）；
+# 单个失败不阻断装机（记日志继续，L3 运行时兜底补）。顺序：base 先行（字母序 glob），模板随后
+# （模板各自再调 base，幂等无害）。
+if [ -d "$INSTALL_DIR/docker-prep" ]; then
+    echo "[cybercafe] docker-prep 装机预装（遍历 docker-prep*.sh，幂等；单失败不阻断）..."
+    for P in "$INSTALL_DIR"/docker-prep/docker-prep*.sh; do
+        [ -f "$P" ] || continue
+        NAME=$(basename "$P")
+        LOG=/tmp/docker-prep-${NAME%.sh}.log
+        if bash "$P" >"$LOG" 2>&1; then
+            echo "[cybercafe] docker-prep 完成: $NAME"
+        else
+            echo "[cybercafe] ⚠️ docker-prep 未完成（$NAME，rc=$?；见 $LOG；L3 运行时兜底补）" >&2
+        fi
+    done
+fi
+
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}.service
 # 克隆自愈场景（provision.sh 内调用本脚本，CYBERCAFE_FROM_PROVISION=1）时 provision 单元正在运行，
