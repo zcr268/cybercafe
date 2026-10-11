@@ -705,7 +705,8 @@ def _unit_enabled():
 def update_managed_scripts():
     """统一脚本更新管理（L2，t45）：低频跑、幂等、全程 fail-open。
     - 清单 MANAGED_SCRIPTS 覆盖 agent 自身 / install.sh / provision.sh / service / L3；
-    - agent 自身走 self_update（心跳路径、服务端版本号比对）；
+    - agent 自身：managed 通道内容驱动同步（_managed_self_update，不依赖 VERSION 比对），
+      心跳 self_update（版本号比对）保留覆盖非武装机；
     - install.sh / provision.sh / service：install-extra 下发 → sha256 比对 → 原子替换，
       仅批次/镜像机武装（单机休眠：零文件替换、零 enable）；
     - L3（cybercafe-deploy.py）走特殊路径：**每次下发部署指令时由云端重取最新并校验执行**，
@@ -722,7 +723,7 @@ def update_managed_scripts():
     for item in MANAGED_SCRIPTS:
         try:
             if item["kind"] in ("self", "l3-deploy"):
-                continue  # self→心跳 self_update；l3→每次部署重取特殊路径
+                continue  # self→循环后统一自更新（先同步其余脚本再重启）；l3→每次部署重取特殊路径
             src = _fetch_extra(item["name"])
             if src is None:
                 log("清单更新 %s 拉取失败（fail-open，跳过本轮）" % item["name"])
@@ -743,7 +744,38 @@ def update_managed_scripts():
                     _ensure_provision_unit()
         except Exception as e:
             log("清单更新 %s 异常: %s" % (item["name"], e))
+    # 循环后统一自更新：先同步其余清单脚本，再处理 agent 自身（内容差→替换→重启退出）
+    _managed_self_update()
 update_managed_scripts._dormant_logged = False
+
+def _managed_self_update():
+    """agent 自身纳入 managed 同步（内容驱动，不依赖 VERSION 比对触发）：
+    经 /api/agent/latest（设备 key 鉴权，注入本机 API_BASE/DEVICE_KEY）拉取最新字节，
+    与运行中文件内容比对，有差异才动作——先写临时文件再原子替换（不半截文件），
+    随后重启服务并退出（旧进程退出、新进程加载新代码）。
+    防自更新循环：替换即重启，重启后新进程内容比对相等，不再动作；拉取/校验失败 fail-open。"""
+    try:
+        target = os.path.abspath(sys.argv[0])
+        st, _js, raw = http("GET", "/api/agent/latest", timeout=60)
+        if st != 200 or not raw or "VERSION" not in raw:
+            log("self 拉取失败（fail-open，跳过本轮）: %s" % st)
+            return
+        cur = ""
+        try:
+            with open(target) as f:
+                cur = f.read()
+        except Exception:
+            pass
+        if cur == raw:
+            return
+        if _atomic_write(target, raw, 0o755):
+            log("agent 已自更新（managed 通道），sha256 %s…，重启服务"
+                % hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:8])
+            collect_layers(force=True)   # 强制刷新 L1/L2（避免 60s 缓存陈旧）
+            run("systemctl restart cybercafe-agent", timeout=30)
+            sys.exit(0)
+    except Exception as e:
+        log("self 更新异常: %s" % e)
 
 def _ensure_provision_unit():
     """provision.sh 更新/补齐后：确保首启单元存在、enable、daemon-reload，并当场触发一次注册（旧镜像救活）"""
