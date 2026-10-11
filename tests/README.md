@@ -25,12 +25,28 @@ cd /tmp/界面统一/部署状态操作列统一
 ego-browser nodejs < tests/w1_baseline_record.js
 # 2) 验收断言（当前基线跑=红，预期多例失败；t2 实现后应全绿）
 ego-browser nodejs < tests/w1_acceptance.js
-# 3) 混合形态与聊天形态盲区用例（t27；引擎+组件共存不被劫持 + 聊天三形态防回归）
+# 3) 混合形态与聊天形态用例（t27 创建；t37 同步唯一部署模型语义——dep.type 权威）
 ego-browser nodejs < tests/w1_hybrid.js
+# 4) 全面功能回归（t36 用户指令：把不同模型和所有功能都测试一遍）
+ego-browser nodejs < tests/w1_full.js
 ```
 
 - 截图：`tests/screenshots/<name>-<时间戳>.png`（每次运行唯一、不互相覆盖）。
 - 每个脚本最后输出 JSON：`{ url, 操作序列, 截图, results, 被测路径, 结论 }`
+
+### w1_full.js（t36 全面功能回归）
+用户点名全面测试。覆盖：
+- A 引擎部署×模型：4 引擎（ollama/vllm/sglang/strata）7 模型真实点击「部署引擎」→ confirm 统一文案捕获 → 心跳取 deploy 指令
+  断言 → 模拟 agent 进度（docker→部署中+进度条；verify→运行中+100%）→ 名称徽章=引擎·模型/一句话=运行正常 → 详情→日志tab 含执行记录；
+- B 组件安装/卸载×档位：OCR 装（指令→安装中→运行中 v1.4.4）卸（卸载中）；H3 h3-fast/h3-hd 各装一次（档位标注 h3-fast (UD-Q2_K_XL)/h3-hd (Q4_K_M)）；
+  H3 卸载确认框文案约 27GB（观察：UI 无卸载按钮入口，h3Cmd 卸载分支无 UI 触发点）；
+- C 唯一部署模型（t37）：C0 过渡态兜底（旧混合残留→type 权威显示 H3）、C1 互斥正向（装 H3→先停引擎→显示 H3 running+h3-hd）、
+  C2 互斥回切（部署引擎→vllm·模型，H3 残留清除）；F8 finding 判定附修复前后对比；
+- D 级联交互（三类型联动+恒部署引擎+confirm 统一）；E 聊天形态（引擎=文本/纯H3=视频/纯OCR=图片/混合残留=视频）；
+- F 通用组真实点击（隧道/详情折叠+日志tab/回收/删除确认框+恢复种子）；
+- G 色板 9 形态进度（deploying/installing/queued 进度条；running=100%；卸载中琥珀降级）；
+- H 回归由 w1_acceptance.js（A1–A6）+ w1_hybrid.js（H1/H2/C1）承担。
+种子 hostname 前缀 `w1f-`，结束 DELETE 清理。
 
 ### w1_hybrid.js（混合形态 + 聊天形态，t27 补盲区）
 背景：生产实测发现「引擎+组件共存」形态（deploy 槽被 agent 写入 type:'h3'/'ocr' + detail/quant/tier，云端深度合并保留 engine），
