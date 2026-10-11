@@ -33,13 +33,17 @@ ego-browser nodejs < tests/w1_hybrid.js
 - 每个脚本最后输出 JSON：`{ url, 操作序列, 截图, results, 被测路径, 结论 }`
 
 ### w1_hybrid.js（混合形态 + 聊天形态，t27 补盲区）
-生产实测发现「引擎+组件共存」形态（deploy 槽被 agent 写入 type:'h3'/'ocr' + detail/quant/tier，云端深度合并保留 engine），
-W1 前端曾以 dep.type 全面劫持状态卡/级联默认/聊天形态。本用例种子 3 台混合设备（vllm+h3 残留、ollama+h3 残留、ollama+ocr 残留）
-+ 2 台纯组件设备（OCR/H3），断言：
-- H1 混合形态状态卡：名称徽章=引擎·模型（非 OCR/H3）、状态徽章=运行中、进度存在、一句话不含 h3 档位（h3-hd/h3-fast/Q4_K_M）；
-- H2 混合形态操作列默认=文生文→引擎→模型→部署引擎（级联不被劫持）；
-- C1 聊天形态：混合=chatLabel 引擎+模型（非 'H3 0.1.0'）+ chatMeta「文本聊天」+文本输入框显示；纯 H3/OCR=视频/图片形态（防回归）。
-种子说明：混合设备 deploy 补 `state:'online'`（cardState 不推导组件态，状态徽章=运行中所需）与 tunnel_url（聊天下拉要求在线+隧道）。
+背景：生产实测发现「引擎+组件共存」形态（deploy 槽被 agent 写入 type:'h3'/'ocr' + detail/quant/tier，云端深度合并保留 engine），
+W1 前端曾以 dep.type 全面劫持状态卡/级联默认/聊天形态。t27 补混合形态盲区用例；**t37 同步唯一部署模型语义**（用户定：
+一台设备同一时刻仅一个部署物，引擎/OCR/H3 平级互斥，deploy 槽类型权威——部署 H3 先卸载引擎、部署引擎后 H3 卸载）。
+本用例种子 3 台混合残留设备（vllm+h3 残留、ollama+h3 残留、ollama+ocr 残留）+ 纯OCR/纯H3/纯引擎 3 台，断言：
+- H1 状态卡 type 权威：混合残留（engine+type:h3/ocr）→ 名称徽章=H3/OCR（非引擎）、状态徽章=运行中、进度存在、
+  一句话归属槽内类型（H3 含 h3-hd 档位标注 / OCR 含 v1.4.4）；
+- H2 级联默认随 type 权威：h3 残留→文生视频→[H3]→档位（h3-fast 首项）→主按钮恒=部署引擎；ocr 残留→图生文→[OCR]；
+  纯引擎→文生文→引擎→模型（防回归保留）；
+- C1 聊天形态随 type 权威：h3 残留→H3 视频形态（chatLabel=H3 v0.1.0、chatMeta=H3 文生视频、vidIn 显/ocrIn·chatIn 隐）；
+  ocr 残留→OCR 图片形态；纯 H3/纯 OCR 同；纯引擎→文本聊天（防回归保留）。
+种子说明：设备 deploy 补 `state:'online'`（状态徽章=运行中所必需）与 tunnel_url（聊天下拉要求在线+隧道）。
 hostname 前缀 `w1h-`，结束 DELETE 清理。
 
 ### 截图不入库的理由（F3）
