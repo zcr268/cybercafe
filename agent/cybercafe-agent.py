@@ -924,6 +924,7 @@ def run_ocr(action):
     os.makedirs(src_dir, exist_ok=True)
     os.makedirs(ocr_dir, exist_ok=True)   # t112：防御——install 日志重定向需 OCR_DIR 在（机器被手动清除后防崩）
     if action == "install":
+        _preempt_deploy_slot("ocr")     # t37：唯一部署互斥——停其它部署（引擎/H3/隧道）+ 清云端槽
         _ensure_docker_prep("ocr")          # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_ocr("ocr/ocr.py", src_dir + "/ocr.py")
         _fetch_ocr("ocr/install.sh", src_dir + "/install.sh")
@@ -969,6 +970,7 @@ def run_ocr(action):
         _atomic_write(_ocr_marker, _json.dumps({"state": "uninstalled", "ts": int(time.time())}))
         _clear_component_deploy()   # t78：卸载后唯一部署槽回「无」
         _stop_tunnel()
+        _clear_cloud_deploy_slot()  # t37：云端 deploy 槽整槽清空（不留 stale 组件块）
         report_progress("ocr", "ok", "OCR 已卸载")
         return 0
     raise RuntimeError("未知 OCR action: %s" % action)
@@ -1014,6 +1016,7 @@ def run_h3(action, option=None):
     src_dir = _H3_SRC_DIR                  # 脚本源目录（与 H3_ROOT 分离，避免 cp 同文件）
     os.makedirs(src_dir, exist_ok=True)
     if action == "install":
+        _preempt_deploy_slot("h3")      # t37：唯一部署互斥——停其它部署（引擎/OCR/隧道）+ 清云端槽
         _ensure_docker_prep("h3")           # t106：运行时兜底（标记/镜像就绪则零动作）
         _fetch_h3("minimax-h3/install.sh", src_dir + "/install.sh")
         st = {"state": "installing", "ts": int(time.time())}
@@ -1064,6 +1067,7 @@ def run_h3(action, option=None):
         # uninstall.sh 已 rm -rf H3_ROOT（含 .version）→ 状态回到未安装
         _clear_component_deploy()
         _stop_tunnel()
+        _clear_cloud_deploy_slot()  # t37：云端 deploy 槽整槽清空（不留 stale 组件块）
         report_progress("h3", "ok", "H3 已卸载")
         return 0
     if action in ("start", "stop", "status"):
@@ -1137,6 +1141,22 @@ def _stop_other_deployments(target):
     if target != "engine":
         _stop_tunnel()
     log("互斥清理完成（target=%s，其余部署已停）" % target)
+
+def _preempt_deploy_slot(target):
+    """t37 唯一部署互斥（组件侧）：新组件部署（OCR/H3）下发前：
+    ① 停掉本机其它部署（引擎容器/对侧组件/隧道，_stop_other_deployments）；
+    ② 清本地组件槽（_clear_component_deploy）；
+    ③ 先上报 deploy={state:'stopped'} 触发云端**整槽替换**——deploy 槽唯一、互斥覆盖，
+       杜绝旧引擎字段（engine/model/tunnel_url 等）经浅合并残留成混合记录。
+    引擎路径无需此处处理：云端 admin/deploy 入队时已整槽重置（state=queued + engine/model）。"""
+    _stop_other_deployments(target)
+    _clear_component_deploy()
+    heartbeat({"deploy": {"state": "stopped", "ts": int(time.time())}})
+    log("t37 组件部署前清槽完成（target=%s，云端 deploy 整槽替换为 stopped）" % target)
+
+def _clear_cloud_deploy_slot():
+    """t37：卸载完成后清空云端 deploy 槽（stopped 整槽替换，不留 stale 组件块）"""
+    heartbeat({"deploy": {"state": "stopped", "ts": int(time.time())}})
 
 def _start_component_tunnel(port):
     """组件部署建机器隧道（trycloudflare）暴露组件 API（H3=11435 / OCR=8820）；
