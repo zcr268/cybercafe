@@ -460,10 +460,13 @@ function targetName(d) {
   const ocr = ((d.components || {}).ocr) || {};
   const h3 = ((d.components || {}).h3) || {};
   const progress = s => ["installing", "uninstalling"].includes(s);   // 仅在途组件操作参与判定
-  if (dep.engine) return dep.engine;                                  // 引擎部署优先（当前部署类型）
-  if (dep.type === "ocr") return "OCR";                               // 组件部署仅在无引擎时才成立
+  // 唯一部署模型（t37）：deploy 槽类型权威——引擎/OCR/H3 平级互斥，同一时刻仅一个部署物。
+  // 组件 installed/running 状态不参与判定（互斥下不与引擎共存）；旧混合残留以 dep.type 为准。
+  if (dep.type === "ocr") return "OCR";
   if (dep.type === "h3") return "H3";
-  if (progress(ocr.state)) return "OCR";                              // 无引擎部署时的组件在途态
+  if (dep.type === "engine" && dep.engine) return dep.engine;
+  if (dep.engine) return dep.engine;                        // 旧记录无 type（纯引擎部署）
+  if (progress(ocr.state)) return "OCR";                    // 无部署槽时的组件在途操作
   if (progress(h3.state)) return "H3";
   return "未部署";
 }
@@ -471,10 +474,9 @@ function oneLiner(d) {
   const dep = d.deploy || {};
   const st = cardState(d);
   const parts = [];
-  // 引擎主部署时，dep.step 属组件步（h3/ocr）的 version/detail 是组件残留，不拼进引擎一句话
-  const compStep = dep.step === "h3" || dep.step === "ocr";
-  if (dep.version && !(dep.engine && compStep)) parts.push("v" + dep.version);
-  if (dep.detail && !(dep.engine && compStep)) parts.push(dep.detail);
+  // 唯一部署模型（t37）：deploy 槽数据即当前部署物数据——version/detail 无条件归属槽内类型
+  if (dep.version) parts.push("v" + dep.version);
+  if (dep.detail) parts.push(dep.detail);
   if (targetName(d) === "H3") {
     // H3 档位标注（t108/t111 移植）：dep.quant/tier 优先，旧部署用 components.h3.quant 兜底推导
     const q = dep.quant || ((d.components || {}).h3 || {}).quant || "";
@@ -502,7 +504,9 @@ function statusCardHtml(d, dep) {
   const st = cardState(d);
   const m = CARD_STATES[st] || { text: "闲置", cls: "idle" };
   const name = targetName(d);
-  const nameTxt = (name !== "未部署" && dep.model) ? name + " · " + dep.model : name;
+  // 唯一部署模型（t37）：组件部署（OCR/H3）不拼引擎 model 残留；引擎部署才拼 model
+  const nameTxt = (name !== "未部署" && name !== "OCR" && name !== "H3" && dep.model)
+    ? name + " · " + dep.model : name;
   const busy = d.busy === true ? ` <span class="state busy">忙（${esc(d.busy_type || "部署中")}）</span>` : "";
   const tunnel = safeUrl(dep.tunnel_url)
     ? `<br><a class="mono" href="${esc(dep.tunnel_url)}" target="_blank" rel="noopener">${esc(dep.tunnel_url)}</a>` : "";
@@ -617,9 +621,10 @@ function updateChatMode(d) {
     chatCurDev = did;
     if (did) chatRender(did); else $("chatbox").innerHTML = "";
   }
-  const isEngine = !!(dep && dep.engine);   // 引擎部署优先：组件形态仅当无 engine 且 dep.type 明确时生效
-  const isOcr = !!(dep && !isEngine && dep.type === "ocr");
-  const isVid = !!(dep && !isEngine && dep.type === "h3");
+  // 唯一部署模型（t37）：deploy 槽类型权威——引擎/OCR/H3 平级，聊天形态随槽内类型
+  const tgt = d ? targetName(d) : null;
+  const isOcr = tgt === "OCR";
+  const isVid = tgt === "H3";
   $("ocrIn").style.display = isOcr ? "" : "none";
   $("vidIn").style.display = isVid ? "" : "none";
   $("chatIn").style.display = (isOcr || isVid) ? "none" : "";
@@ -648,7 +653,7 @@ function cascadeState(id) {
   const dep = (devices.find(d => d.device_id === id) || {}).deploy || {};
   const t = $("t_" + id), e = $("e_" + id), o = $("o_" + id);
   const st = {
-    type: t ? t.value : (dep.engine ? "text" : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text")),
+    type: t ? t.value : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text"),
     engine: e ? e.value : (dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama"),
     option: o ? o.value : "",
   };
@@ -675,9 +680,9 @@ function cascadeDeployLabel() {
   return "部署引擎";
 }
 function cascadeHtml(d, dep) {
-  // 默认（老记录/未部署兼容）：dep.type 与 dep.engine 冲突时以 dep.engine 为准（当前部署类型）
+  // 唯一部署模型（t37）：deploy 槽类型权威——type=ocr/h3 默认组件类型；engine/无 type 默认文生文
   const prev = cascadeSel[d.device_id];
-  const st = prev || { type: dep.engine ? "text" : (dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text"),
+  const st = prev || { type: dep.type === "ocr" ? "ocr" : dep.type === "h3" ? "h3" : "text",
                        engine: dep.engine || (catalog && Object.keys(catalog.engine || {})[0]) || "ollama",
                        option: dep.model || "" };
   return `<select id="t_${d.device_id}" onchange="cascadeChanged('${d.device_id}','type')" style="max-width:88px">
