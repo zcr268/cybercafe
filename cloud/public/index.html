@@ -620,6 +620,8 @@ function updateChatMode(d) {
   if (did !== chatCurDev) {
     chatCurDev = did;
     if (did) chatRender(did); else $("chatbox").innerHTML = "";
+    // t39：切入 H3 文生视频设备时回填上次提交的参数（仅在切设备/首入时一次，轮询重渲染不覆盖用户输入）
+    if (did && targetName(d) === "H3") vidParamsApply();
   }
   // 唯一部署模型（t37）：deploy 槽类型权威——引擎/OCR/H3 平级，聊天形态随槽内类型
   const tgt = d ? targetName(d) : null;
@@ -769,6 +771,7 @@ window.vidSend = async () => {
   const w = parseInt($("vidW").value) || 480;
   const h = parseInt($("vidH").value) || 280;
   const steps = parseInt($("vidSteps").value) || 20;
+  vidParamsSave({ frames, width: w, height: h, steps });   // t39：提交即记忆参数（下次打开回填）
   // t109：计时起点=点击生成（提交 vid_gen 前）——终用时含排队+生成，进度与终值同源
   const t0 = performance.now();
   addMsg("user", "🎬 " + prompt + `（${w}×${h} · ${frames}帧 · ${steps}步）`);
@@ -1021,6 +1024,21 @@ const MSG_STORE_KEY = "cc_chat_msgs_v1";
 const MSG_MAX_PER_DEV = 100, MSG_MAX_CHARS = 2000;
 const MSG_INFLIGHT_RE = /生成中|识别中|等待结果|采样较久/;
 let chatCurDev = null;               // 当前 chatbox 展示的设备（恢复/切换判定）
+// t39：H3 文生视频参数记忆——vidFrames/vidW/vidH/vidSteps 提交时存 localStorage，下次打开视频面板回填。
+// 提示词 vidPrompt 不记忆（用户需求为参数记忆，键独立分开）。无记录时保持 HTML 默认 16/480/280/20。
+const VID_PARAMS_KEY = "cc_vid_params_v1";
+function vidParamsLoad() { try { return JSON.parse(localStorage.getItem(VID_PARAMS_KEY)) || null; } catch (e) { return null; } }
+function vidParamsSave(p) { try { localStorage.setItem(VID_PARAMS_KEY, JSON.stringify(p)); } catch (e) { /* 存储满静默降级 */ } }
+function vidParamsApply() {
+  const p = vidParamsLoad();
+  if (!p) return;
+  const num = (v, d) => { const n = parseInt(v); return isFinite(n) && n > 0 ? n : d; };
+  const f = $("vidFrames"), w = $("vidW"), h = $("vidH"), s = $("vidSteps");
+  if (f) f.value = num(p.frames, 16);
+  if (w) w.value = num(p.width, 480);
+  if (h) h.value = num(p.height, 280);
+  if (s) s.value = num(p.steps, 20);
+}
 function chatLoad() { try { return JSON.parse(localStorage.getItem(MSG_STORE_KEY)) || {}; } catch (e) { return {}; } }
 function chatSave(all) { try { localStorage.setItem(MSG_STORE_KEY, JSON.stringify(all)); } catch (e) { /* 存储满静默降级内存态 */ } }
 function chatGet(devId) { return chatLoad()["dev:" + devId] || []; }
@@ -1190,6 +1208,7 @@ $("btnSend").onclick = send;
 $("btnOcr").onclick = ocrSend;
 $("btnVid").onclick = vidSend;
 $("vidPrompt").addEventListener("keydown", e => { if (e.key === "Enter") vidSend(); });
+vidParamsApply();   // t39：页面加载回填上次视频参数（无记录保持默认 16/480/280/20）
 $("chatIn").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
 $("ocrUrl").addEventListener("keydown", e => { if (e.key === "Enter") ocrSend(); });
 $("chatDev").addEventListener("change", () => {
