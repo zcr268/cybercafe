@@ -225,19 +225,31 @@ $("btnScripts").onclick = async () => {
 };
 
 let scriptsMap = null;   // /api/admin/scripts → {name: sha8}，供 L1/L2 一致性比对（UI 侧，best-effort）
-async function ensureScripts() {
-  if (scriptsMap) return scriptsMap;
-  try {
-    const j = await api("/api/admin/scripts");
-    scriptsMap = {};
-    (j.scripts || []).forEach(x => { if (x && x.name) scriptsMap[x.name] = x.sha; });
-  } catch (e) { scriptsMap = null; }
-  return scriptsMap;
+let scriptsFetchedAt = 0;   // t43：脚本映射 TTL 计时（详情展开不重复请求）
+let scriptsInflight = null; // t43：在途请求复用——并发展开不并发请求
+const SCRIPTS_TTL = 30000;  // t43：一致性标注 best-effort——短 TTL 缓存，fillDetail 展开/轮询不再每次请求
+async function ensureScripts(force) {
+  if (scriptsMap && !force && Date.now() - scriptsFetchedAt < SCRIPTS_TTL) return scriptsMap;
+  if (scriptsInflight && !force) return scriptsInflight;
+  scriptsInflight = (async () => {
+    try {
+      const j = await api("/api/admin/scripts");
+      scriptsMap = {};
+      (j.scripts || []).forEach(x => { if (x && x.name) scriptsMap[x.name] = x.sha; });
+      scriptsFetchedAt = Date.now();
+    } catch (e) { scriptsMap = null; }
+    finally { scriptsInflight = null; }
+    return scriptsMap;
+  })();
+  return scriptsInflight;
 }
 
 async function loadScriptsPanel() {
   try {
     const j = await api("/api/admin/scripts");
+    scriptsMap = {};                       // t43：面板刷新即同步一致性缓存（TTL 旁路更新点）
+    (j.scripts || []).forEach(x => { if (x && x.name) scriptsMap[x.name] = x.sha; });
+    scriptsFetchedAt = Date.now();
     $("scriptsRows").innerHTML = j.scripts.map(s => {
       const ver = s.version || "未标注";
       const sha = s.sha || (s.error ? "获取失败" : "-");
@@ -922,14 +934,9 @@ async function loadLogTab(id) {
     if (nearBottom) body.scrollTop = body.scrollHeight;
   } catch (e) {}
 }
-async function fillDetail(id) {
-  const tr = $("detail_" + id);
-  if (!tr) return;
-  await ensureScripts();   // 一致性比对需 /api/admin/scripts（best-effort，失败 → '—'，不报错）
-  const d = devices.find(x => x.device_id === id) || {};
-  // t78 UI 反馈：详情折叠用深色面板配色（#0f172a 同页头脚本面板）；内含 详情|日志 两个 tab
-  const curTab = tabState[id] || "A";   // t90：按记忆应用 tab（默认详情），轮询重渲染不跳回
-  const _detailHtml = `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
+// t43：详情折叠行 HTML 纯同步构建（无网络；一致性标注用 scriptsMap 当前缓存，best-effort）
+function detailHtml(id, d, curTab) {
+  return `<td colspan="4" style="background:#0f172a;border:1px solid #334155;padding:8px 12px;color:#e2e8f0">
     <div class="row" style="margin-bottom:6px">
       <button class="sm" id="tabA_${id}" onclick="switchTab('${id}','A')">详情</button>
       <button class="sm gray" id="tabB_${id}" onclick="switchTab('${id}','B')">日志</button>
@@ -937,15 +944,36 @@ async function fillDetail(id) {
     <div id="tabA_${id}_body" style="font-size:12px;color:#e2e8f0;display:${curTab === "A" ? "" : "none"}">${layersDetail(d)}</div>
     <div id="tabB_${id}_body" style="display:${curTab === "B" ? "" : "none"};font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e2e8f0;white-space:pre-wrap;max-height:200px;overflow-y:auto">（加载日志…）</div>
   </td>`;
-  if (detailFp[id] === _detailHtml) {   // t96：数据未变不重绘折叠（附简要重同步 tab 高亮）
-    if (curTab === "B") { const a = $("tabA_" + id), b = $("tabB_" + id); if (a && b) { a.className = "sm gray"; b.className = "sm"; } }
-    await loadLogTab(id);
-    return;
+}
+async function fillDetail(id) {
+  const tr = $("detail_" + id);
+  if (!tr) return;
+  const d = devices.find(x => x.device_id === id) || {};
+  const curTab = tabState[id] || "A";   // t90：按记忆应用 tab（默认详情），轮询重渲染不跳回
+  // t43：同步构建立即上屏（不等网络）——缓存命中/二次展开瞬间可见
+  const html = detailHtml(id, d, curTab);
+  if (detailFp[id] !== html) {   // t96：数据未变不重绘折叠（附简要重同步 tab 高亮）
+    detailFp[id] = html;
+    tr.innerHTML = html;
+  } else if (curTab === "B") {
+    const a = $("tabA_" + id), b = $("tabB_" + id);
+    if (a && b) { a.className = "sm gray"; b.className = "sm"; }
   }
-  detailFp[id] = _detailHtml;
-  tr.innerHTML = _detailHtml;
-  if (curTab === "B") { $("tabA_" + id).className = "sm gray"; $("tabB_" + id).className = "sm"; }
-  await loadLogTab(id);
+  if (curTab === "B") await loadLogTab(id);
+  // t43：一致性标注（scriptsMap）异步刷新——TTL 内不重复请求；刷新后仅在内容变化时重绘
+  ensureScripts().then(() => {
+    if (!expandedDevs.has(id)) return;
+    const d2 = devices.find(x => x.device_id === id) || {};
+    const h2 = detailHtml(id, d2, tabState[id] || "A");
+    if (h2 !== detailFp[id]) {
+      detailFp[id] = h2;
+      tr.innerHTML = h2;
+    }
+    if ((tabState[id] || "A") === "B") {
+      const a = $("tabA_" + id), b = $("tabB_" + id);
+      if (a && b) { a.className = "sm gray"; b.className = "sm"; }
+    }
+  });
 }
 window.switchTab = (id, tab) => {
   tabState[id] = tab;   // t90：记录用户所选 tab，重渲染后保持
@@ -961,19 +989,29 @@ window.toggleDetail = async (id, opts) => {
   const tr = $("detail_" + id);
   if (!tr) return;
   if (tr.style.display !== "none") {
-    if (opts && opts.tab) { switchTab(id, opts.tab); return; }   // 已展开时的「日志」= 切到日志 tab，不收起
-    tr.style.display = "none";
-    expandedDevs.delete(id);
-    delete tabState[id];   // t90：关闭折叠时清理该设备 tab 记忆，避免残留
-    if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
+    // t43：展开状态折叠语义——点当前激活 tab 对应的按钮=折叠；点另一 tab=切换不折叠
+    const cur = tabState[id] || "A";
+    if (opts && opts.tab) {
+      if (opts.tab === cur) foldDetail(id, tr);          // B 展开点日志=折叠
+      else switchTab(id, opts.tab);                      // A 展开点日志=切 B
+    } else {
+      if (cur === "B") switchTab(id, "A");               // B 展开点详情=切 A
+      else foldDetail(id, tr);                           // A 展开点详情=折叠
+    }
     return;
   }
   expandedDevs.add(id);
-  await fillDetail(id);
-  tr.style.display = "";
+  tr.style.display = "";         // t43：展开瞬间可见（不再等网络完成）
+  fillDetail(id);                // 异步同步构建/刷新（缓存命中即时有内容）
   if (opts && opts.tab === "B") switchTab(id, "B");
   if (!logIntervals[id]) logIntervals[id] = setInterval(() => { if (expandedDevs.has(id)) loadLogTab(id); }, 3000);
 };
+function foldDetail(id, tr) {
+  tr.style.display = "none";
+  expandedDevs.delete(id);
+  delete tabState[id];   // t90：关闭折叠时清理该设备 tab 记忆，避免残留
+  if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
+}
 window.viewLog = id => { toggleDetail(id, { tab: "B" }); };   // 日志并入折叠的「日志」tab
 
 // ---------- 进度条 ----------
