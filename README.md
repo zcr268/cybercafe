@@ -22,7 +22,7 @@
 |---|---|
 | `cloud/` | ① 云管理端：真实独立 HTTP 服务（`server.js` 入口 + `src/index.js` fetch 处理器）+ 管理/聊天 UI（`public/index.html`） |
 | `agent/` | ②③ 本地脚本：`install.sh`（安装/自更新/开机自启）+ `cybercafe-agent.py`（控制脚本，仅依赖 Python3 标准库） |
-| `docs/` | 设计/可行性文档（递进关系，各版独立可用）：现有架构交互图（[cybercafe-architecture.html](docs/cybercafe-architecture.html)）、三层控制演进方案（[三层控制演进方案.md](docs/三层控制演进方案.md)）与[三层演进架构图](docs/three-tier-architecture.html)、[CyberCafe × KeyCompute 双系统并存架构图](docs/cybercafe-keycompute-architecture.html)、[双系统现状缺口视图](docs/cybercafe-keycompute-gap.html)与[缺口审计](docs/双系统缺口审计-20261014.md) |
+| `docs/` | 设计/可行性文档（递进关系，各版独立可用）：现有架构交互图（[cybercafe-architecture.html](docs/cybercafe-architecture.html)）、三层控制演进方案（[三层控制演进方案.md](docs/三层控制演进方案.md)）与[三层演进架构图](docs/three-tier-architecture.html)、[CyberCafe × KeyCompute 双系统并存架构图](docs/cybercafe-keycompute-architecture.html)、[双系统现状缺口视图](docs/cybercafe-keycompute-gap.html)与[缺口审计](docs/双系统缺口审计-20261014.md)、[网吧侧需求文档](docs/网吧侧需求-20261014.md) |
 
 ## 部署云管理端
 
