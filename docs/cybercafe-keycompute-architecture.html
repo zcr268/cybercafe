@@ -5013,11 +5013,17 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="0" data-composition-frame-label="KeyCompute 项目（销售 · 定价 · 计费 · 账本）" x="9" y="34" width="537" height="350" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="网吧机房现场（L2 · L3 · slave 同机房部署）" x="9" y="254" width="1612" height="470" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="CyberCafe 项目（机器管控 · 调度 · 缓存）" x="569" y="34" width="1052" height="690" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="KeyCompute · master（云端控制与计费）" x="23" y="34" width="509" height="110" rx="8" class="c-security-group" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="2" data-composition-frame-label="网吧机房现场（L2 · L3 · slave 同机房）" x="25" y="274" width="1580" height="450" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="2" data-composition-frame-label="KeyCompute · slave（机房服务面）" x="23" y="274" width="509" height="110" rx="8" class="c-security-group" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="3" data-composition-frame-label="CyberCafe · L1 云控制层" x="583" y="34" width="1024" height="110" rx="8" class="c-security-group" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="4" data-composition-frame-label="CyberCafe · L2 网吧控制层" x="583" y="274" width="1024" height="110" rx="8" class="c-security-group" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="5" data-composition-frame-label="CyberCafe · L3 工作机执行层" x="758" y="504" width="674" height="220" rx="8" class="c-security-group" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
@@ -5126,8 +5132,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="context" x="457.5" y="226" class="t-muted" font-size="9" text-anchor="middle">外部调用方</text>
         </g>
 
-        <g id="node-kc-write" data-node-id="kc-write" data-node-label="控制面写入口" tabindex="0" role="button" aria-label="聚焦控制面写入口，用户/定价/密钥, KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="用户/定价/密钥" data-node-tag="master" data-node-context="KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>控制面写入口 · 用户/定价/密钥 · KeyCompute 项目（销售 · 定价 · 计费 · 账本） · master</title>
+        <g id="node-kc-write" data-node-id="kc-write" data-node-label="控制面写入口" tabindex="0" role="button" aria-label="聚焦控制面写入口，用户/定价/密钥, KeyCompute · master（云端控制与计费）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="用户/定价/密钥" data-node-tag="master" data-node-context="KeyCompute · master（云端控制与计费）">
+          <title>控制面写入口 · 用户/定价/密钥 · KeyCompute · master（云端控制与计费） · master</title>
           <rect x="395" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="395" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(401 66) scale(0.6875)">
@@ -5138,8 +5144,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="457.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">master</text>
         </g>
 
-        <g id="node-kc-etcd" data-node-id="kc-etcd" data-node-label="配置同步出口" tabindex="0" role="button" aria-label="聚焦配置同步出口，etcd · mTLS, KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="etcd · mTLS" data-node-tag="master" data-node-context="KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>配置同步出口 · etcd · mTLS · KeyCompute 项目（销售 · 定价 · 计费 · 账本） · master</title>
+        <g id="node-kc-etcd" data-node-id="kc-etcd" data-node-label="配置同步出口" tabindex="0" role="button" aria-label="聚焦配置同步出口，etcd · mTLS, KeyCompute · master（云端控制与计费）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="etcd · mTLS" data-node-tag="master" data-node-context="KeyCompute · master（云端控制与计费）">
+          <title>配置同步出口 · etcd · mTLS · KeyCompute · master（云端控制与计费） · master</title>
           <rect x="215" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="215" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(221 66) scale(0.6875)">
@@ -5150,8 +5156,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="277.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">master</text>
         </g>
 
-        <g id="node-kc-billing" data-node-id="kc-billing" data-node-label="计费与账本" tabindex="0" role="button" aria-label="聚焦计费与账本，余额/限额/对账, KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="余额/限额/对账" data-node-tag="master" data-node-context="KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>计费与账本 · 余额/限额/对账 · KeyCompute 项目（销售 · 定价 · 计费 · 账本） · master</title>
+        <g id="node-kc-billing" data-node-id="kc-billing" data-node-label="计费与账本" tabindex="0" role="button" aria-label="聚焦计费与账本，余额/限额/对账, KeyCompute · master（云端控制与计费）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="余额/限额/对账" data-node-tag="master" data-node-context="KeyCompute · master（云端控制与计费）">
+          <title>计费与账本 · 余额/限额/对账 · KeyCompute · master（云端控制与计费） · master</title>
           <rect x="35" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="35" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(41 66) scale(0.6875)">
@@ -5162,8 +5168,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="97.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">master</text>
         </g>
 
-        <g id="node-l1-identity" data-node-id="l1-identity" data-node-label="L2 身份注册" tabindex="0" role="button" aria-label="聚焦L2 身份注册，签发 L2 身份, CyberCafe 项目（机器管控 · 调度 · 缓存）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="签发 L2 身份" data-node-tag="L1" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <title>L2 身份注册 · 签发 L2 身份 · CyberCafe 项目（机器管控 · 调度 · 缓存） · L1</title>
+        <g id="node-l1-identity" data-node-id="l1-identity" data-node-label="L2 身份注册" tabindex="0" role="button" aria-label="聚焦L2 身份注册，签发 L2 身份, CyberCafe · L1 云控制层" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="签发 L2 身份" data-node-tag="L1" data-node-context="CyberCafe · L1 云控制层">
+          <title>L2 身份注册 · 签发 L2 身份 · CyberCafe · L1 云控制层 · L1</title>
           <rect x="595" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="595" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(601 66) scale(0.6875)">
@@ -5174,8 +5180,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="657.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">L1</text>
         </g>
 
-        <g id="node-l1-reserve" data-node-id="l1-reserve" data-node-label="预留机策略" tabindex="0" role="button" aria-label="聚焦预留机策略，档位最少台数, CyberCafe 项目（机器管控 · 调度 · 缓存）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="档位最少台数" data-node-tag="L1" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <title>预留机策略 · 档位最少台数 · CyberCafe 项目（机器管控 · 调度 · 缓存） · L1</title>
+        <g id="node-l1-reserve" data-node-id="l1-reserve" data-node-label="预留机策略" tabindex="0" role="button" aria-label="聚焦预留机策略，档位最少台数, CyberCafe · L1 云控制层" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="档位最少台数" data-node-tag="L1" data-node-context="CyberCafe · L1 云控制层">
+          <title>预留机策略 · 档位最少台数 · CyberCafe · L1 云控制层 · L1</title>
           <rect x="945" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="945" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(951 66) scale(0.6875)">
@@ -5186,8 +5192,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1007.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">L1</text>
         </g>
 
-        <g id="node-l1-console" data-node-id="l1-console" data-node-label="全局大盘" tabindex="0" role="button" aria-label="聚焦全局大盘，机房聚合, CyberCafe 项目（机器管控 · 调度 · 缓存）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="机房聚合" data-node-tag="L1" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <title>全局大盘 · 机房聚合 · CyberCafe 项目（机器管控 · 调度 · 缓存） · L1</title>
+        <g id="node-l1-console" data-node-id="l1-console" data-node-label="全局大盘" tabindex="0" role="button" aria-label="聚焦全局大盘，机房聚合, CyberCafe · L1 云控制层" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="机房聚合" data-node-tag="L1" data-node-context="CyberCafe · L1 云控制层">
+          <title>全局大盘 · 机房聚合 · CyberCafe · L1 云控制层 · L1</title>
           <rect x="1120" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1120" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1126 66) scale(0.6875)">
@@ -5198,8 +5204,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1182.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">L1</text>
         </g>
 
-        <g id="node-l1-batch" data-node-id="l1-batch" data-node-label="批次码签发" tabindex="0" role="button" aria-label="聚焦批次码签发，识别机器来源, CyberCafe 项目（机器管控 · 调度 · 缓存）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="识别机器来源" data-node-tag="L1" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <title>批次码签发 · 识别机器来源 · CyberCafe 项目（机器管控 · 调度 · 缓存） · L1</title>
+        <g id="node-l1-batch" data-node-id="l1-batch" data-node-label="批次码签发" tabindex="0" role="button" aria-label="聚焦批次码签发，识别机器来源, CyberCafe · L1 云控制层" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="识别机器来源" data-node-tag="L1" data-node-context="CyberCafe · L1 云控制层">
+          <title>批次码签发 · 识别机器来源 · CyberCafe · L1 云控制层 · L1</title>
           <rect x="1295" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1295" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1301 66) scale(0.6875)">
@@ -5210,8 +5216,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1357.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">L1</text>
         </g>
 
-        <g id="node-l1-dist" data-node-id="l1-dist" data-node-label="最高分发节点" tabindex="0" role="button" aria-label="聚焦最高分发节点，镜像 / 权重, CyberCafe 项目（机器管控 · 调度 · 缓存）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="镜像 / 权重" data-node-tag="L1" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <title>最高分发节点 · 镜像 / 权重 · CyberCafe 项目（机器管控 · 调度 · 缓存） · L1</title>
+        <g id="node-l1-dist" data-node-id="l1-dist" data-node-label="最高分发节点" tabindex="0" role="button" aria-label="聚焦最高分发节点，镜像 / 权重, CyberCafe · L1 云控制层" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="镜像 / 权重" data-node-tag="L1" data-node-context="CyberCafe · L1 云控制层">
+          <title>最高分发节点 · 镜像 / 权重 · CyberCafe · L1 云控制层 · L1</title>
           <rect x="1470" y="60" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1470" y="60" width="125" height="64" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1476 66) scale(0.6875)">
@@ -5222,8 +5228,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1532.5" y="116" class="t-cloud" font-size="7" text-anchor="middle">L1</text>
         </g>
 
-        <g id="node-kc-slave-in" data-node-id="kc-slave-in" data-node-label="推理请求入口" tabindex="0" role="button" aria-label="聚焦推理请求入口，对外唯一服务面, 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="对外唯一服务面" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>推理请求入口 · 对外唯一服务面 · 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本） · slave</title>
+        <g id="node-kc-slave-in" data-node-id="kc-slave-in" data-node-label="推理请求入口" tabindex="0" role="button" aria-label="聚焦推理请求入口，对外唯一服务面, 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="对外唯一服务面" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）">
+          <title>推理请求入口 · 对外唯一服务面 · 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面） · slave</title>
           <rect x="395" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="395" y="300" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(401 306) scale(0.6875)">
@@ -5234,8 +5240,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="457.5" y="356" class="t-backend" font-size="7" text-anchor="middle">slave</text>
         </g>
 
-        <g id="node-kc-slave-view" data-node-id="kc-slave-view" data-node-label="本地只读视图" tabindex="0" role="button" aria-label="聚焦本地只读视图，鉴权·定价·拦截, 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="security" data-node-sublabel="鉴权·定价·拦截" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>本地只读视图 · 鉴权·定价·拦截 · 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本） · slave</title>
+        <g id="node-kc-slave-view" data-node-id="kc-slave-view" data-node-label="本地只读视图" tabindex="0" role="button" aria-label="聚焦本地只读视图，鉴权·定价·拦截, 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）" aria-pressed="false" data-node-kind="security" data-node-sublabel="鉴权·定价·拦截" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）">
+          <title>本地只读视图 · 鉴权·定价·拦截 · 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面） · slave</title>
           <rect x="215" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="215" y="300" width="125" height="64" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(221 306) scale(0.6875)">
@@ -5247,8 +5253,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="277.5" y="356" class="t-security" font-size="7" text-anchor="middle">slave</text>
         </g>
 
-        <g id="node-kc-slave-report" data-node-id="kc-slave-report" data-node-label="用量上报" tabindex="0" role="button" aria-label="聚焦用量上报，Kafka · SASL, 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Kafka · SASL" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <title>用量上报 · Kafka · SASL · 网吧机房现场（L2 · L3 · slave 同机房） › KeyCompute 项目（销售 · 定价 · 计费 · 账本） · slave</title>
+        <g id="node-kc-slave-report" data-node-id="kc-slave-report" data-node-label="用量上报" tabindex="0" role="button" aria-label="聚焦用量上报，Kafka · SASL, 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Kafka · SASL" data-node-tag="slave" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面）">
+          <title>用量上报 · Kafka · SASL · 网吧机房现场（L2 · L3 · slave 同机房部署） › KeyCompute · slave（机房服务面） · slave</title>
           <rect x="35" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="35" y="300" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(41 306) scale(0.6875)">
@@ -5259,8 +5265,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="97.5" y="356" class="t-backend" font-size="7" text-anchor="middle">slave</text>
         </g>
 
-        <g id="node-l2-api" data-node-id="l2-api" data-node-label="内部网关" tabindex="0" role="button" aria-label="聚焦内部网关，收转发 · 限流, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="security" data-node-sublabel="收转发 · 限流" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>内部网关 · 收转发 · 限流 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-api" data-node-id="l2-api" data-node-label="内部网关" tabindex="0" role="button" aria-label="聚焦内部网关，收转发 · 限流, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="security" data-node-sublabel="收转发 · 限流" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>内部网关 · 收转发 · 限流 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="595" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="595" y="300" width="125" height="64" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(601 306) scale(0.6875)">
@@ -5272,8 +5278,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="657.5" y="356" class="t-security" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l2-queue" data-node-id="l2-queue" data-node-label="任务队列" tabindex="0" role="button" aria-label="聚焦任务队列，池满排队, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="池满排队" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>任务队列 · 池满排队 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-queue" data-node-id="l2-queue" data-node-label="任务队列" tabindex="0" role="button" aria-label="聚焦任务队列，池满排队, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="池满排队" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>任务队列 · 池满排队 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="770" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="770" y="300" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(776 306) scale(0.6875)">
@@ -5284,8 +5290,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="832.5" y="356" class="t-backend" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l2-sched" data-node-id="l2-sched" data-node-label="任务调度器" tabindex="0" role="button" aria-label="聚焦任务调度器，模型池·最少负载, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="模型池·最少负载" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>任务调度器 · 模型池·最少负载 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-sched" data-node-id="l2-sched" data-node-label="任务调度器" tabindex="0" role="button" aria-label="聚焦任务调度器，模型池·最少负载, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="模型池·最少负载" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>任务调度器 · 模型池·最少负载 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="945" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="945" y="300" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(951 306) scale(0.6875)">
@@ -5296,8 +5302,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1007.5" y="356" class="t-backend" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l2-proxy" data-node-id="l2-proxy" data-node-label="组件适配层" tabindex="0" role="button" aria-label="聚焦组件适配层，统一契约→后端, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="统一契约→后端" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>组件适配层 · 统一契约→后端 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-proxy" data-node-id="l2-proxy" data-node-label="组件适配层" tabindex="0" role="button" aria-label="聚焦组件适配层，统一契约→后端, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="统一契约→后端" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>组件适配层 · 统一契约→后端 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="1120" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1120" y="300" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1126 306) scale(0.6875)">
@@ -5308,8 +5314,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1182.5" y="356" class="t-backend" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l2-state" data-node-id="l2-state" data-node-label="本机房状态" tabindex="0" role="button" aria-label="聚焦本机房状态，设备/任务/心跳, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="database" data-node-sublabel="设备/任务/心跳" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>本机房状态 · 设备/任务/心跳 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-state" data-node-id="l2-state" data-node-label="本机房状态" tabindex="0" role="button" aria-label="聚焦本机房状态，设备/任务/心跳, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="database" data-node-sublabel="设备/任务/心跳" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>本机房状态 · 设备/任务/心跳 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="1295" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1295" y="300" width="125" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1301 306) scale(0.6875)">
@@ -5321,8 +5327,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1357.5" y="356" class="t-database" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l2-cache" data-node-id="l2-cache" data-node-label="缓存层" tabindex="0" role="button" aria-label="聚焦缓存层，镜像 / 权重, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="database" data-node-sublabel="镜像 / 权重" data-node-tag="L2" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>缓存层 · 镜像 / 权重 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L2</title>
+        <g id="node-l2-cache" data-node-id="l2-cache" data-node-label="缓存层" tabindex="0" role="button" aria-label="聚焦缓存层，镜像 / 权重, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层" aria-pressed="false" data-node-kind="database" data-node-sublabel="镜像 / 权重" data-node-tag="L2" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层">
+          <title>缓存层 · 镜像 / 权重 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L2 网吧控制层 · L2</title>
           <rect x="1470" y="300" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1470" y="300" width="125" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1476 306) scale(0.6875)">
@@ -5334,8 +5340,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1532.5" y="356" class="t-database" font-size="7" text-anchor="middle">L2</text>
         </g>
 
-        <g id="node-l3-agent" data-node-id="l3-agent" data-node-label="工作机控制" tabindex="0" role="button" aria-label="聚焦工作机控制，管理机·下发上报, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="管理机·下发上报" data-node-tag="L3" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>工作机控制 · 管理机·下发上报 · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L3</title>
+        <g id="node-l3-agent" data-node-id="l3-agent" data-node-label="工作机控制" tabindex="0" role="button" aria-label="聚焦工作机控制，管理机·下发上报, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="管理机·下发上报" data-node-tag="L3" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层">
+          <title>工作机控制 · 管理机·下发上报 · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层 · L3</title>
           <rect x="1012" y="530" width="166" height="70" rx="6" class="c-mask"/>
           <rect x="1012" y="530" width="166" height="70" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1018 536) scale(0.6875)">
@@ -5346,8 +5352,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1095" y="592" class="t-backend" font-size="7" text-anchor="middle">L3</text>
         </g>
 
-        <g id="node-ocr" data-node-id="ocr" data-node-label="OCR" tabindex="0" role="button" aria-label="聚焦OCR，PaddleOCR, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PaddleOCR" data-node-tag="L3" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>OCR · PaddleOCR · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L3</title>
+        <g id="node-ocr" data-node-id="ocr" data-node-label="OCR" tabindex="0" role="button" aria-label="聚焦OCR，PaddleOCR, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PaddleOCR" data-node-tag="L3" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层">
+          <title>OCR · PaddleOCR · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层 · L3</title>
           <rect x="770" y="640" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="770" y="640" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(776 646) scale(0.6875)">
@@ -5358,8 +5364,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="832.5" y="696" class="t-backend" font-size="7" text-anchor="middle">L3</text>
         </g>
 
-        <g id="node-t2i" data-node-id="t2i" data-node-label="文生图" tabindex="0" role="button" aria-label="聚焦文生图，OpenAI Images, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="OpenAI Images" data-node-tag="L3" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>文生图 · OpenAI Images · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L3</title>
+        <g id="node-t2i" data-node-id="t2i" data-node-label="文生图" tabindex="0" role="button" aria-label="聚焦文生图，OpenAI Images, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="OpenAI Images" data-node-tag="L3" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层">
+          <title>文生图 · OpenAI Images · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层 · L3</title>
           <rect x="945" y="640" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="945" y="640" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(951 646) scale(0.6875)">
@@ -5370,8 +5376,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1007.5" y="696" class="t-backend" font-size="7" text-anchor="middle">L3</text>
         </g>
 
-        <g id="node-t2v" data-node-id="t2v" data-node-label="文生视频" tabindex="0" role="button" aria-label="聚焦文生视频，ComfyUI, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ComfyUI" data-node-tag="L3" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>文生视频 · ComfyUI · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L3</title>
+        <g id="node-t2v" data-node-id="t2v" data-node-label="文生视频" tabindex="0" role="button" aria-label="聚焦文生视频，ComfyUI, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ComfyUI" data-node-tag="L3" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层">
+          <title>文生视频 · ComfyUI · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层 · L3</title>
           <rect x="1120" y="640" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1120" y="640" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1126 646) scale(0.6875)">
@@ -5382,8 +5388,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1182.5" y="696" class="t-backend" font-size="7" text-anchor="middle">L3</text>
         </g>
 
-        <g id="node-h3" data-node-id="h3" data-node-label="H3 生成" tabindex="0" role="button" aria-label="聚焦H3 生成，sd-server, CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="sd-server" data-node-tag="L3" data-node-context="CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房）">
-          <title>H3 生成 · sd-server · CyberCafe 项目（机器管控 · 调度 · 缓存） › 网吧机房现场（L2 · L3 · slave 同机房） · L3</title>
+        <g id="node-h3" data-node-id="h3" data-node-label="H3 生成" tabindex="0" role="button" aria-label="聚焦H3 生成，sd-server, 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="sd-server" data-node-tag="L3" data-node-context="网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层">
+          <title>H3 生成 · sd-server · 网吧机房现场（L2 · L3 · slave 同机房部署） › CyberCafe · L3 工作机执行层 · L3</title>
           <rect x="1295" y="640" width="125" height="64" rx="6" class="c-mask"/>
           <rect x="1295" y="640" width="125" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1301 646) scale(0.6875)">
@@ -5489,19 +5495,34 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="security-group" data-composition-frame-label="KeyCompute 项目（销售 · 定价 · 计费 · 账本）">
-          <rect data-graph-role="structural-frame-label-mask" x="13" y="38" width="292.9058328516129" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="17" y="52.716130032258064" class="t-security" font-size="10.716130032258064" font-weight="600">KeyCompute 项目（销售 · 定价 · 计费 · 账本）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="网吧机房现场（L2 · L3 · slave 同机房部署）">
+          <rect data-graph-role="structural-frame-label-mask" x="13" y="258" width="280.0464768129032" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="17" y="272.7161300322581" class="t-cloud" font-size="10.716130032258064" font-weight="600">网吧机房现场（L2 · L3 · slave 同机房部署）</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="CyberCafe 项目（机器管控 · 调度 · 缓存）">
-          <rect data-graph-role="structural-frame-label-mask" x="573" y="38" width="267.18712077419355" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="577" y="52.716130032258064" class="t-security" font-size="10.716130032258064" font-weight="600">CyberCafe 项目（机器管控 · 调度 · 缓存）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="KeyCompute · master（云端控制与计费）">
+          <rect data-graph-role="structural-frame-label-mask" x="27" y="38" width="247.89808671612903" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="31" y="52.716130032258064" class="t-security" font-size="10.716130032258064" font-weight="600">KeyCompute · master（云端控制与计费）</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="region" data-composition-frame-label="网吧机房现场（L2 · L3 · slave 同机房）">
-          <rect data-graph-role="structural-frame-label-mask" x="29" y="278" width="254.32776473548387" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="33" y="292.7161300322581" class="t-cloud" font-size="10.716130032258064" font-weight="600">网吧机房现场（L2 · L3 · slave 同机房）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="security-group" data-composition-frame-label="KeyCompute · slave（机房服务面）">
+          <rect data-graph-role="structural-frame-label-mask" x="27" y="278" width="215.74969661935484" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="31" y="292.7161300322581" class="t-security" font-size="10.716130032258064" font-weight="600">KeyCompute · slave（机房服务面）</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="3" data-composition-frame-kind="security-group" data-composition-frame-label="CyberCafe · L1 云控制层">
+          <rect data-graph-role="structural-frame-label-mask" x="587" y="38" width="157.8825944451613" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="591" y="52.716130032258064" class="t-security" font-size="10.716130032258064" font-weight="600">CyberCafe · L1 云控制层</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="4" data-composition-frame-kind="security-group" data-composition-frame-label="CyberCafe · L2 网吧控制层">
+          <rect data-graph-role="structural-frame-label-mask" x="587" y="278" width="170.74195048387097" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="591" y="292.7161300322581" class="t-security" font-size="10.716130032258064" font-weight="600">CyberCafe · L2 网吧控制层</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="5" data-composition-frame-kind="security-group" data-composition-frame-label="CyberCafe · L3 工作机执行层">
+          <rect data-graph-role="structural-frame-label-mask" x="762" y="508" width="183.60130652258061" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="766" y="522.7161300322581" class="t-security" font-size="10.716130032258064" font-weight="600">CyberCafe · L3 工作机执行层</text>
         </g>
 
         <!-- Legend -->

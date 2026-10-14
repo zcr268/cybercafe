@@ -377,28 +377,10 @@
   ],
   "boundaries": [
     {
-      "kind": "security-group",
-      "label": "KeyCompute 项目（销售 · 定价 · 计费 · 账本）",
+      "kind": "region",
+      "label": "网吧机房现场（L2 · L3 · slave 同机房部署）",
       "pad": 26,
       "wraps": [
-        "kc-write",
-        "kc-etcd",
-        "kc-billing",
-        "kc-slave-in",
-        "kc-slave-view",
-        "kc-slave-report"
-      ]
-    },
-    {
-      "kind": "security-group",
-      "label": "CyberCafe 项目（机器管控 · 调度 · 缓存）",
-      "pad": 26,
-      "wraps": [
-        "l1-identity",
-        "l1-reserve",
-        "l1-console",
-        "l1-batch",
-        "l1-dist",
         "l2-api",
         "l2-queue",
         "l2-sched",
@@ -409,23 +391,62 @@
         "ocr",
         "t2i",
         "t2v",
-        "h3"
+        "h3",
+        "kc-slave-in",
+        "kc-slave-view",
+        "kc-slave-report"
       ]
     },
     {
-      "kind": "region",
-      "label": "网吧机房现场（L2 · L3 · slave 同机房）",
-      "pad": 10,
+      "kind": "security-group",
+      "label": "KeyCompute · master（云端控制与计费）",
+      "pad": 12,
+      "wraps": [
+        "kc-write",
+        "kc-etcd",
+        "kc-billing"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "KeyCompute · slave（机房服务面）",
+      "pad": 12,
       "wraps": [
         "kc-slave-in",
         "kc-slave-view",
-        "kc-slave-report",
+        "kc-slave-report"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L1 云控制层",
+      "pad": 12,
+      "wraps": [
+        "l1-identity",
+        "l1-reserve",
+        "l1-console",
+        "l1-batch",
+        "l1-dist"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L2 网吧控制层",
+      "pad": 12,
+      "wraps": [
         "l2-api",
         "l2-queue",
         "l2-sched",
         "l2-proxy",
         "l2-state",
-        "l2-cache",
+        "l2-cache"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L3 工作机执行层",
+      "pad": 12,
+      "wraps": [
         "l3-agent",
         "ocr",
         "t2i",
