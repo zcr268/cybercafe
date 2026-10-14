@@ -377,23 +377,45 @@
   ],
   "boundaries": [
     {
-      "kind": "region",
-      "label": "最高管理层（云端 · 两项目各自顶端）",
+      "kind": "security-group",
+      "label": "KeyCompute 项目（销售 · 定价 · 计费 · 账本）",
+      "pad": 26,
       "wraps": [
         "kc-write",
         "kc-etcd",
         "kc-billing",
+        "kc-slave-in",
+        "kc-slave-view",
+        "kc-slave-report"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe 项目（机器管控 · 调度 · 缓存）",
+      "pad": 26,
+      "wraps": [
         "l1-identity",
         "l1-reserve",
         "l1-console",
         "l1-batch",
-        "l1-dist"
-      ],
-      "pad": 18
+        "l1-dist",
+        "l2-api",
+        "l2-queue",
+        "l2-sched",
+        "l2-proxy",
+        "l2-state",
+        "l2-cache",
+        "l3-agent",
+        "ocr",
+        "t2i",
+        "t2v",
+        "h3"
+      ]
     },
     {
       "kind": "region",
-      "label": "网吧机房（L2 · L3 · slave 同机房部署）",
+      "label": "网吧机房现场（L2 · L3 · slave 同机房）",
+      "pad": 10,
       "wraps": [
         "kc-slave-in",
         "kc-slave-view",
@@ -409,8 +431,7 @@
         "t2i",
         "t2v",
         "h3"
-      ],
-      "pad": 18
+      ]
     }
   ],
   "connections": [
