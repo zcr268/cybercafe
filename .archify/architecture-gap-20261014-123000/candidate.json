@@ -296,7 +296,7 @@
       "label": "工作机控制",
       "sublabel": "机器直出公网",
       "pos": [
-        1012,
+        1099,
         530
       ],
       "size": [
@@ -311,7 +311,7 @@
       "label": "OCR",
       "sublabel": "PaddleOCR",
       "pos": [
-        770,
+        945,
         640
       ],
       "size": [
@@ -334,21 +334,6 @@
       "label": "文生图",
       "sublabel": "零代码",
       "pos": [
-        945,
-        640
-      ],
-      "size": [
-        125,
-        64
-      ],
-      "tag": "未建"
-    },
-    {
-      "id": "t2v",
-      "type": "external",
-      "label": "文生视频",
-      "sublabel": "零代码",
-      "pos": [
         1120,
         640
       ],
@@ -362,7 +347,7 @@
       "id": "h3",
       "type": "backend",
       "label": "H3 生成",
-      "sublabel": "sd-server",
+      "sublabel": "文生视频 · sd-server",
       "pos": [
         1295,
         640
@@ -457,7 +442,6 @@
         "l3-agent",
         "ocr",
         "t2i",
-        "t2v",
         "h3",
         "kc-slave-in",
         "kc-slave-view",
@@ -517,7 +501,6 @@
         "l3-agent",
         "ocr",
         "t2i",
-        "t2v",
         "h3"
       ]
     },
@@ -669,12 +652,6 @@
       "label": "文生图"
     },
     {
-      "id": "run-t2v",
-      "from": "l3-agent",
-      "to": "t2v",
-      "label": "文生视频"
-    },
-    {
       "id": "run-h3",
       "from": "l3-agent",
       "to": "h3",
@@ -705,7 +682,7 @@
         "L2 网吧控制层整层无代码，图上六个节点全为设计态",
         "无统一任务 API（无 /v1/tasks、无 task_id），客户端直连单机原生端点",
         "现状违反「L3 永不公网暴露」：每台机器自建隧道直出公网，管理 UI 直连",
-        "文生图与文生视频零代码；反倒把文生文链路先建了"
+        "四组件只建成 OCR 与 H3（H3 即文生视频），文生图零代码"
       ]
     },
     {
