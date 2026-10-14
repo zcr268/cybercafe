@@ -1,0 +1,770 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CyberCafe × KeyCompute · 双系统并存 · 现状缺口视图",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-cybercafe-keycompute-20261014-113000/cybercafe-keycompute-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/zcr268/cybercafe.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "cfd0e15727bc3cf139a4ad5d77e89e8d52316dcb"
+    },
+    "legend": {
+      "entries": {
+        "external": {
+          "label": "外部系统 / 未落地能力"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "API 客户端",
+      "sublabel": "外部调用方",
+      "pos": [
+        395,
+        180
+      ],
+      "size": [
+        125,
+        64
+      ]
+    },
+    {
+      "id": "kc-write",
+      "type": "cloud",
+      "label": "控制面写入口",
+      "sublabel": "用户/定价/密钥",
+      "pos": [
+        395,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建"
+    },
+    {
+      "id": "kc-etcd",
+      "type": "cloud",
+      "label": "配置同步出口",
+      "sublabel": "etcd · mTLS",
+      "pos": [
+        215,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建"
+    },
+    {
+      "id": "kc-billing",
+      "type": "cloud",
+      "label": "计费与账本",
+      "sublabel": "缺成本/应付",
+      "pos": [
+        35,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "l1-identity",
+      "type": "external",
+      "label": "L2 身份注册",
+      "sublabel": "无 L2 实体",
+      "pos": [
+        595,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l1-reserve",
+      "type": "external",
+      "label": "预留机策略",
+      "sublabel": "无常驻策略",
+      "pos": [
+        945,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l1-console",
+      "type": "cloud",
+      "label": "全局大盘",
+      "sublabel": "仅设备平铺",
+      "pos": [
+        1120,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "l1-batch",
+      "type": "cloud",
+      "label": "批次码签发",
+      "sublabel": "识别机器来源",
+      "pos": [
+        1295,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建"
+    },
+    {
+      "id": "l1-dist",
+      "type": "cloud",
+      "label": "最高分发节点",
+      "sublabel": "仅脚本分发",
+      "pos": [
+        1470,
+        60
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "kc-slave-in",
+      "type": "backend",
+      "label": "推理请求入口",
+      "sublabel": "对外唯一服务面",
+      "pos": [
+        395,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建"
+    },
+    {
+      "id": "kc-slave-view",
+      "type": "security",
+      "label": "本地只读视图",
+      "sublabel": "限额未落地",
+      "pos": [
+        215,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "kc-slave-report",
+      "type": "backend",
+      "label": "用量上报",
+      "sublabel": "Kafka · SASL",
+      "pos": [
+        35,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建"
+    },
+    {
+      "id": "l2-api",
+      "type": "external",
+      "label": "内部网关",
+      "sublabel": "无网关进程",
+      "pos": [
+        595,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l2-queue",
+      "type": "external",
+      "label": "任务队列",
+      "sublabel": "无任务队列",
+      "pos": [
+        770,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l2-sched",
+      "type": "external",
+      "label": "任务调度器",
+      "sublabel": "无调度器",
+      "pos": [
+        945,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l2-proxy",
+      "type": "external",
+      "label": "组件适配层",
+      "sublabel": "无适配层",
+      "pos": [
+        1120,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l2-state",
+      "type": "database",
+      "label": "本机房状态",
+      "sublabel": "仅 L1 集中 KV",
+      "pos": [
+        1295,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "l2-cache",
+      "type": "external",
+      "label": "缓存层",
+      "sublabel": "无缓存仓",
+      "pos": [
+        1470,
+        300
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "l3-agent",
+      "type": "backend",
+      "label": "工作机控制",
+      "sublabel": "机器直出公网",
+      "pos": [
+        1012,
+        530
+      ],
+      "size": [
+        166,
+        70
+      ],
+      "tag": "部分"
+    },
+    {
+      "id": "ocr",
+      "type": "backend",
+      "label": "OCR",
+      "sublabel": "PaddleOCR",
+      "pos": [
+        770,
+        640
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建",
+      "sources": [
+        {
+          "path": "ocr/install.sh",
+          "line": 1,
+          "end_line": 15,
+          "label": "RapidOCR 容器"
+        }
+      ]
+    },
+    {
+      "id": "t2i",
+      "type": "external",
+      "label": "文生图",
+      "sublabel": "零代码",
+      "pos": [
+        945,
+        640
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "t2v",
+      "type": "external",
+      "label": "文生视频",
+      "sublabel": "零代码",
+      "pos": [
+        1120,
+        640
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "未建"
+    },
+    {
+      "id": "h3",
+      "type": "backend",
+      "label": "H3 生成",
+      "sublabel": "sd-server",
+      "pos": [
+        1295,
+        640
+      ],
+      "size": [
+        125,
+        64
+      ],
+      "tag": "已建",
+      "sources": [
+        {
+          "path": "minimax-h3/README.md",
+          "line": 23,
+          "end_line": 24,
+          "label": "sd-server 11435 · vid_gen"
+        }
+      ]
+    },
+    {
+      "id": "gap-supplier",
+      "type": "external",
+      "label": "KC · 供给方自助接入",
+      "sublabel": "无注册/发证 API",
+      "pos": [
+        35,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-cost",
+      "type": "external",
+      "label": "KC · 成本与应付账单",
+      "sublabel": "无成本列/结算单",
+      "pos": [
+        260,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-pay",
+      "type": "external",
+      "label": "KC · 在线支付充值",
+      "sublabel": "支付路由未注册",
+      "pos": [
+        485,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-quota",
+      "type": "external",
+      "label": "KC · 限额拦截",
+      "sublabel": "日/月/请求级缺",
+      "pos": [
+        710,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-recon",
+      "type": "external",
+      "label": "KC · 主从账本核对",
+      "sublabel": "仅配置面对账",
+      "pos": [
+        935,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-dispatch",
+      "type": "external",
+      "label": "两系统 · 对外调度接口",
+      "sublabel": "无下发/回调",
+      "pos": [
+        1160,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    },
+    {
+      "id": "gap-protocol",
+      "type": "external",
+      "label": "两系统 · 对接协议",
+      "sublabel": "转发契约未定义",
+      "pos": [
+        1385,
+        800
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "缺口"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "网吧机房现场（L2 · L3 · slave 同机房部署）",
+      "pad": 26,
+      "wraps": [
+        "l2-api",
+        "l2-queue",
+        "l2-sched",
+        "l2-proxy",
+        "l2-state",
+        "l2-cache",
+        "l3-agent",
+        "ocr",
+        "t2i",
+        "t2v",
+        "h3",
+        "kc-slave-in",
+        "kc-slave-view",
+        "kc-slave-report"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "KeyCompute · master（云端控制与计费）",
+      "pad": 12,
+      "wraps": [
+        "kc-write",
+        "kc-etcd",
+        "kc-billing"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "KeyCompute · slave（机房服务面）",
+      "pad": 12,
+      "wraps": [
+        "kc-slave-in",
+        "kc-slave-view",
+        "kc-slave-report"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L1 云控制层",
+      "pad": 12,
+      "wraps": [
+        "l1-identity",
+        "l1-reserve",
+        "l1-console",
+        "l1-batch",
+        "l1-dist"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L2 网吧控制层",
+      "pad": 12,
+      "wraps": [
+        "l2-api",
+        "l2-queue",
+        "l2-sched",
+        "l2-proxy",
+        "l2-state",
+        "l2-cache"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "CyberCafe · L3 工作机执行层",
+      "pad": 12,
+      "wraps": [
+        "l3-agent",
+        "ocr",
+        "t2i",
+        "t2v",
+        "h3"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "缺口 · 尚无节点承载的能力（两项目待建）",
+      "pad": 14,
+      "wraps": [
+        "gap-supplier",
+        "gap-cost",
+        "gap-pay",
+        "gap-quota",
+        "gap-recon",
+        "gap-dispatch",
+        "gap-protocol"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-request",
+      "from": "client",
+      "to": "kc-slave-in",
+      "label": "真实请求",
+      "variant": "emphasis"
+    },
+    {
+      "id": "slave-verify",
+      "from": "kc-slave-in",
+      "to": "kc-slave-view",
+      "label": "拦截"
+    },
+    {
+      "id": "slave-usage",
+      "from": "kc-slave-view",
+      "to": "kc-slave-report",
+      "label": "用量"
+    },
+    {
+      "id": "config-flow",
+      "from": "kc-etcd",
+      "to": "kc-slave-view",
+      "label": "配置流 主→从",
+      "variant": "dashed"
+    },
+    {
+      "id": "event-flow",
+      "from": "kc-slave-report",
+      "to": "kc-billing",
+      "label": "事件流 从→主",
+      "variant": "dashed"
+    },
+    {
+      "id": "forward",
+      "from": "kc-slave-in",
+      "to": "l2-api",
+      "label": "请求转发",
+      "variant": "emphasis"
+    },
+    {
+      "id": "send-back",
+      "from": "l2-api",
+      "to": "kc-slave-in",
+      "label": "结果回传",
+      "variant": "dashed"
+    },
+    {
+      "id": "identity-issue",
+      "from": "l1-identity",
+      "to": "l2-api",
+      "label": "身份签发",
+      "variant": "dashed"
+    },
+    {
+      "id": "reserve-push",
+      "from": "l1-reserve",
+      "to": "l2-sched",
+      "label": "预留机配置",
+      "variant": "dashed"
+    },
+    {
+      "id": "batch-push",
+      "from": "l1-batch",
+      "to": "l2-state",
+      "label": "批次码",
+      "variant": "dashed"
+    },
+    {
+      "id": "dist-cache",
+      "from": "l1-dist",
+      "to": "l2-cache",
+      "label": "镜像/权重分发",
+      "variant": "dashed"
+    },
+    {
+      "id": "aggregate",
+      "from": "l2-state",
+      "to": "l1-console",
+      "label": "聚合上报",
+      "variant": "dashed"
+    },
+    {
+      "id": "enqueue",
+      "from": "l2-api",
+      "to": "l2-queue",
+      "label": "入队"
+    },
+    {
+      "id": "dequeue",
+      "from": "l2-queue",
+      "to": "l2-sched",
+      "label": "调度"
+    },
+    {
+      "id": "dispatch",
+      "from": "l2-sched",
+      "to": "l2-proxy",
+      "label": "适配",
+      "variant": "emphasis"
+    },
+    {
+      "id": "invoke",
+      "from": "l2-proxy",
+      "to": "l3-agent",
+      "label": "下发任务",
+      "variant": "emphasis"
+    },
+    {
+      "id": "report-up",
+      "from": "l3-agent",
+      "to": "l2-proxy",
+      "label": "进度回传",
+      "variant": "dashed"
+    },
+    {
+      "id": "heartbeat",
+      "from": "l3-agent",
+      "to": "l2-state",
+      "label": "注册 / 心跳",
+      "variant": "dashed"
+    },
+    {
+      "id": "run-ocr",
+      "from": "l3-agent",
+      "to": "ocr",
+      "label": "OCR 推理"
+    },
+    {
+      "id": "run-t2i",
+      "from": "l3-agent",
+      "to": "t2i",
+      "label": "文生图"
+    },
+    {
+      "id": "run-t2v",
+      "from": "l3-agent",
+      "to": "t2v",
+      "label": "文生视频"
+    },
+    {
+      "id": "run-h3",
+      "from": "l3-agent",
+      "to": "h3",
+      "label": "H3 生成"
+    },
+    {
+      "id": "cache-pull",
+      "from": "l2-cache",
+      "to": "h3",
+      "label": "镜像/权重拉取",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "遮罩怎么读",
+      "items": [
+        "灰色节点 = 该能力在代码库中不存在，只存在于设计文档",
+        "角标三分：已建 / 部分（sublabel 点明缺哪半）/ 未建",
+        "底部缺口带 = 目标架构里还没有节点承载的能力，与上图无连线"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "CyberCafe 侧缺口",
+      "items": [
+        "L2 网吧控制层整层无代码，图上六个节点全为设计态",
+        "无统一任务 API（无 /v1/tasks、无 task_id），客户端直连单机原生端点",
+        "现状违反「L3 永不公网暴露」：每台机器自建隧道直出公网，管理 UI 直连",
+        "文生图与文生视频零代码；反倒把文生文链路先建了"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "KeyCompute 侧缺口",
+      "items": [
+        "主从骨架已落地：master 不下场推理、唯一计费权威、etcd 配置流 + Kafka 事件流、集群注册与转发",
+        "缺口集中在商业闭环：供给方自助接入、成本价与应付账单、在线支付充值全缺位",
+        "限额拦截未落地（只有 RPM/TPM 限流）；余额拦截阈值硬编码",
+        "无对外调度接口：任务下发、结果回调/轮询、状态查询均无"
+      ]
+    }
+  ]
+}
