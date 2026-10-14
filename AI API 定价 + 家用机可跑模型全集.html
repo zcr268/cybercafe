@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文生图 / 文生视频 / OCR · API 定价逻辑 + 家用机可跑模型全集 + 厂商对比（2026-10-13）</title>
+<style>
+:root{--ink:#14161a;--muted:#6b6f76;--line:#e2dfd9;--bg:#f7f6f3;--card:#fbfaf8;--accent:#b45309;--ok:#0f766e;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14.5px;line-height:1.75}
+.wrap{max-width:1080px;margin:0 auto;padding:40px 26px 80px}
+h1{font-family:"Songti SC",Georgia,serif;font-size:28px;line-height:1.32;font-weight:600;border-bottom:2px solid var(--ink);padding-bottom:14px;margin:0 0 14px}
+h2{font-family:"Songti SC",Georgia,serif;font-size:20px;margin:38px 0 10px;padding-left:10px;border-left:3px solid var(--accent)}
+h3{font-size:15.5px;margin:22px 0 8px;color:#2b2f36}
+p{margin:10px 0}
+.lede{color:#3d4148;margin:0 0 22px;font-size:13.5px}
+.sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:12.9px;margin:8px 0 6px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:11.5px;letter-spacing:.3px;border-bottom:1px solid var(--ink);padding:6px 8px}
+td{border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top}
+.num{font-family:Georgia,"Songti SC",serif;font-size:13.5px}
+.hl{color:var(--accent);font-weight:600}
+.ok{color:var(--ok);font-weight:600}
+.bad{color:var(--bad);font-weight:600}
+.tag{display:inline-block;border:1px solid #d6d2ca;border-radius:3px;padding:0 5px;font-size:11px;color:var(--muted);white-space:nowrap}
+.note{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--card);padding:12px 14px;margin:12px 0;font-size:13.2px;color:#3d4148}
+html{scroll-behavior:smooth}
+.shell{display:flex;justify-content:center;align-items:flex-start;gap:34px;max-width:1330px;margin:0 auto;padding:0 24px}
+.sidebar{position:sticky;top:0;flex:0 0 252px;width:252px;max-height:100vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:22px 14px 26px;font-size:12.6px;box-sizing:border-box;margin:40px 0 40px}
+.sbtitle{font-family:"Songti SC",Georgia,serif;font-size:14px;font-weight:600;color:var(--ink);letter-spacing:.08em;padding:0 10px 10px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.sbtoc{list-style:none;margin:0;padding:0;counter-reset:sbn}
+.sbtoc li{counter-increment:sbn;margin:0}
+.sbtoc a{display:block;padding:7px 10px 7px 30px;color:var(--muted);text-decoration:none;border-radius:5px;line-height:1.5;position:relative;transition:background .14s,color .14s;border-left:2px solid transparent}
+.sbtoc a::before{content:counter(sbn);position:absolute;left:9px;top:7px;color:#bdb6a9;font-size:11px;font-family:Georgia,serif}
+.sbtoc a:hover{background:#f2efe9;color:var(--ink)}
+.sbtoc a.on{background:#f7efe2;color:var(--ink);font-weight:600;border-left-color:var(--accent)}
+.sbtoc a.on::before{color:var(--accent);font-weight:600}
+.tocnote{display:block;color:#9c968b;font-size:10.8px;margin-top:1px;font-weight:400}
+.sbfoot{margin-top:14px;padding:10px 10px 0;border-top:1px solid var(--line);color:#9c968b;font-size:10.8px}
+.wrap{flex:0 1 auto;width:1000px;max-width:1000px;min-width:0;margin:0;padding:40px 0 60px 0}
+h2{scroll-margin-top:18px}
+@media (max-width:1040px){
+ .shell{flex-direction:column;padding:0 16px}
+ .sidebar{position:static;flex:1 1 auto;width:auto;max-height:none;margin:20px 0 0}
+ .wrap{width:auto;max-width:none;padding:22px 0 60px}
+}
+td.apiv{font-size:12.2px;line-height:1.62;min-width:190px;background:none;border-left:0;border-right:0}
+td.apiv code{font-size:11.4px}
+h3{font-family:"Songti SC",Georgia,serif}
+th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:20px;transition:background .14s}
+th.sortable:hover{background:#eef2f6}
+th.sortable::after{content:'';position:absolute;right:7px;top:50%;margin-top:-2px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:5px solid #c3ccd6;opacity:.6}
+th.sortable.asc::after{border-bottom-color:#b45309;opacity:1}
+th.sortable.desc::after{border-bottom:0;border-top:5px solid #b45309;margin-top:-3px;opacity:1}
+.sorthint{color:#8a8e95;font-size:11.5px;margin:6px 0 0}
+.fn{color:#8a8e95;font-size:11.5px;margin-top:34px;border-top:1px solid var(--line);padding-top:12px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.4px;background:#efece6;padding:1px 4px;border-radius:3px}
+pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.1px;line-height:1.62;background:#f2efe9;border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin:8px 0;overflow-x:auto;white-space:pre;color:#2b2f36}
+pre code{background:none;padding:0;font-size:inherit;border-radius:0}
+.api{border:1px solid var(--line);background:var(--card);border-radius:5px;padding:12px 14px;margin:14px 0}
+.api h3{margin:0 0 8px;font-size:15.5px;color:#1f2429;font-family:"Songti SC",Georgia,serif}
+.api table{margin:6px 0}
+.api td:first-child{width:118px;color:var(--muted);font-size:12.3px}
+@media print{body{background:#fff}.shell{display:block;max-width:none;padding:0}.sidebar{display:none}.wrap{max-width:none;margin:0;padding:0}h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" id="sidebar">
+<div class="sbtitle">目录</div>
+<ol class="sbtoc">
+<li><a href="#s0"><b>网吧机器赚钱效率评估</b><span class="tocnote">硬件底牌 + 产能 + 行动顺序</span></a></li>
+<li><a href="#s1">定价逻辑：三类能力的计量骨架</a></li>
+<li><a href="#s2">厂商 API 横向对比 · 国内</a></li>
+<li><a href="#s3">厂商 API 横向对比 · 海外</a></li>
+<li><a href="#s4">四个隐藏分歧（比价最易算错之处）</a></li>
+<li><a href="#s5">家用机可跑模型全集 · 图像<span class="tocnote">热度 + 能力</span></a></li>
+<li><a href="#s6">家用机可跑模型全集 · 视频<span class="tocnote">热度 + 能力</span></a></li>
+<li><a href="#s7">家用机可跑模型全集 · OCR / 文档解析<span class="tocnote">热度 + 能力</span></a></li>
+<li><a href="#s8">按显存选型速查</a></li>
+<li><a href="#s9">成本换算示例</a></li>
+<li><a href="#s11">API 调用方式 · 图像 / 视频生成（国内）</a></li>
+<li><a href="#s12">API 调用方式 · 图像 / 视频生成（海外）</a></li>
+<li><a href="#s13">API 调用方式 · OCR / 文档解析</a></li>
+<li><a href="#s14">调用方式的横向规律</a></li>
+<li><a href="#s10">取证局限与来源声明</a></li>
+</ol>
+<div class="sbfoot">点击跳转 · 滚动自动高亮</div>
+</nav>
+<div class="wrap">
+
+<h1>文生图 / 文生视频 / OCR · API 定价逻辑 + 家用机可跑模型全集 + 厂商 API 横向对比</h1>
+<h2 id="s0">零、网吧机器赚钱效率评估（针对 A001-10-003 及同型机）</h2>
+<p class="sub">目标机硬件：<b>RTX 4080 SUPER 16GB</b> 显存 / <b>31.2GB</b> 系统内存 / 云网吧 <b>swnetboot + COW 快照机</b>（重启丢失本地数据）。<br>
+本章数据来源分两类：标 <span class="tag">实测</span> 者取自本仓库真机证据（<code>docs/h3-16gb-config-feasibility.md</code>、<code>docs/qwen27b-feasibility.md</code>、<code>minimax-h3/README.md</code>）；标 <span class="tag">推算</span> 者由公开市场价与产能估算，<b>未经真机验证</b>。驱动视为已就绪，不作为约束。</p>
+
+<div class="note"><b>一句话结论：这台机器的最高效赚钱方式是「GPU 跑图像生成 + CPU 同时跑 OCR」双线并行；视频生成是陷阱（16GB 显存下产能太低，商用不成立）；LLM 聊天零售无竞争力（被大厂价格战碾平）。</b></div>
+
+<h3>0.1 硬件底牌：16GB 显存决定了什么能做、什么不能</h3>
+<table>
+<tr><th>硬件</th><th>参数</th><th>能做（有真机/公开依据）</th><th>做不到</th></tr>
+<tr><td>GPU 显存</td><td class="num">16GB</td><td>SDXL / Flux 量化档图像生成（<span class="tag">实测</span> 峰值远低于上限）<br>H3 视频生成低档（<span class="tag">实测</span> 峰值约 9GB @UD-Q2_K_XL）<br>27B LLM 的 Q3_K_M 全卡（13.6GB）</td><td class="bad">27B Q4_K_M 全卡（16.4GB，需 offload）<br>720P 视频生成<br>Flux.2 [dev] 32B 全精度</td></tr>
+<tr><td>系统内存</td><td class="num">31.2GB</td><td>H3 全参数驻留（<span class="tag">实测</span> 约 27GB：编码器 13.1 + denoiser 8.06 + 视频 VAE 5.2 + 音频 VAE 0.6）<br>OCR（RapidOCR 约 1–2GB）与图像生成<b>并行</b></td><td class="bad">同时跑两个大模型<br>H3 运行期余量仅约 4GB，接近天花板</td></tr>
+<tr><td>磁盘形态</td><td class="num">COW 非持久</td><td>运行期模型缓存</td><td class="bad">跨重启保留权重（H3 27GB / 27B 14–17GB 每次重拉）</td></tr>
+</table>
+<div class="note"><b>硬件层面的三个硬结论：</b><br>
+① <b>16GB 显存是分水岭</b>——它刚好够「生产级图像生成」，但不够「商用级视频生成」（720P 需更高量化档 + 更大激活，16GB 装不下）。<br>
+② <b>31.2GB 内存是隐藏瓶颈</b>——H3 需约 27GB 参数驻留，只剩约 4GB 给系统。这意味着<b>跑视频时这台机器几乎不能再干别的</b>，而跑图像/OCR 时内存很宽裕。<br>
+③ <b>COW 非持久磁盘放大了视频的劣势</b>——每次重启要重拉 27GB 权重，而它的产出又最低。</div>
+
+<h3>0.2 赚钱效率排序（按每机每小时收入）</h3>
+<table>
+<tr><th>业务</th><th>占用资源</th><th>单机产能</th><th>市场价锚点</th><th>每小时收入</th><th>结论</th></tr>
+<tr><td><b>OCR / 文档识别</b></td><td><span class="ok">仅 CPU</span><br>（RapidOCR + onnxruntime）</td><td class="num">约 1,800–3,600 页/小时<br><span class="tag">推算</span> 按 1–2 秒/页</td><td class="num">腾讯 0.08–0.15 元/次<br>阿里 0.0825→0.009 元/次<br>智谱 0.01 元/页</td><td class="num hl">36–72 元<br>（按 0.02 元/页）</td><td class="ok">最优：不占 GPU，可与 GPU 任务并行</td></tr>
+<tr><td><b>图像生成</b></td><td>GPU 独占</td><td class="num">约 360–900 张/小时<br><span class="tag">推算</span> 按 4–10 秒/张 @1024²</td><td class="num">阿里 0.04–0.5 元/张<br>腾讯极速版 0.099 元/张<br>MiniMax 0.025 元/张</td><td class="num hl">36–90 元<br>（按 0.1 元/张）</td><td class="ok">次优：单价稳定，需求分散</td></tr>
+<tr><td><b>视频生成（H3）</b></td><td>GPU + 内存<br>几乎双独占</td><td class="num">640×384：约 36 秒视频/小时<br>720P：约 5–9 秒视频/小时<br><span class="tag">实测</span> 102.65 秒/25 帧</td><td class="num">阿里万相 720P 0.6 元/秒<br>可灵 3.0 720P $0.084/秒</td><td class="num bad">640×384：约 18 元<br>720P：<b>3–5 元</b></td><td class="bad">陷阱：720P 收入低于机时机会成本</td></tr>
+<tr><td><b>LLM 对话</b></td><td>GPU 独占</td><td class="num">27B Q3_K_M 27–30 tok/s<br><span class="tag">实测</span></td><td class="num">大厂已到 1–2 元/百万 token</td><td class="num bad">约 0.2 元</td><td class="bad">最差：完全无竞争力</td></tr>
+</table>
+
+<div class="note"><b>为什么视频生成是陷阱（硬件层面的论证）：</b><br>
+真机实测 <span class="tag">实测</span>：H3 在 16GB 卡上 <b>102.65 秒生成 25 帧</b>（640×384，UD-Q2_K_XL 最低档，峰值显存约 9GB）。25 帧 @24fps = <b>1.04 秒视频</b>，即约 <b>99 秒墙钟换 1 秒视频</b>。<br>
+· 640×384 <b>无法商用</b>（客户要 720P 起）；<br>
+· 商用 720P 需提高量化档与分辨率，耗时按 4–8 倍估算 → 每小时仅产 <b>5–9 秒</b>；<br>
+· 按市场价 0.6 元/秒，每小时收入 <b>3–5.4 元</b>；<br>
+· 网吧机位的机会成本约 5–15 元/小时 → <span class="bad">接单即亏本</span>。<br>
+· 更致命的是<b>内存</b>：跑 H3 时 27GB 参数占满 31.2GB 内存，这台机器<b>连 OCR 都并行不了</b>，等于放弃了最高效的那条线。<br>
+<b>唯一可行用法：只做自有内容</b>（网吧宣传片、客户个性化短视频），不对外按秒接单。</div>
+
+<div class="note"><b>为什么 LLM 聊天不能零售：</b>大厂 API 已打到 1–2 元/百万 token。这台机器 27B 模型跑 27–30 tok/s，一小时产出约 10 万 token（0.1 百万），按市价折合 <b>约 0.2 元</b>——连电费都不够。LLM 只能作为<b>内部增值服务</b>（网吧客服问答、游戏攻略助手）提升上座率，不能当独立收入项。</div>
+
+<h3>0.3 最高效方案：双线并行</h3>
+<div class="note">这台机器真正的优势在于 <b>OCR 走纯 CPU（RapidOCR + onnxruntime，不占 GPU，约 1–2GB 内存）</b>，而图像生成走 GPU——两者可<b>同时跑</b>，一台机器赚两份钱，且 31.2GB 内存完全够用（OCR 1–2GB + 图像模型 8–12GB + 系统 4GB ≈ 20GB 以内）。<br><br>
+· GPU 线：图像生成，约 36–90 元/小时<br>
+· CPU 线：OCR 识别，约 36–72 元/小时<br>
+· 合计理论峰值 <b>72–162 元/小时</b>，减机位机会成本（5–15 元）与电费（约 0.3 元）→ <b>毛利 57–147 元/小时</b><br>
+<span class="m">注意：这是「订单充足」下的理论峰值。没有订单，产能再高也是零——见 0.5。另外 OCR 产能取决于 CPU 核心数，本机核心数未取证，<b>该数字待实测校准</b>。</span></div>
+
+<h3>0.4 使用基数（能服务多少）</h3>
+<table>
+<tr><th>维度</th><th>数字</th><th>说明</th></tr>
+<tr><td>GPU 任务并发</td><td class="num">1</td><td>16GB 只够一个模型实例；图像生成时 GPU 独占，无法并发</td></tr>
+<tr><td>OCR 并发</td><td class="num">4–8</td><td>CPU 推理，取决于核心数；<span class="tag">推算</span>，<b>待实测</b></td></tr>
+<tr><td>单机日产能<br>（按闲置 12 小时）</td><td class="num">OCR 2.2–4.3 万页<br>图像 4,300–10,800 张<br>视频 60–110 秒（640×384）</td><td>按 0.2/0.3 节产能 × 12 小时</td></tr>
+<tr><td>支撑一个企业客户<br>（日 1 万页文档）</td><td class="num">1–2 台</td><td>OCR 线 3–6 小时跑完，余量可接第二个客户</td></tr>
+<tr><td>支撑一个电商客户<br>（日 1,000 张商品图）</td><td class="num">1–3 台</td><td>含冗余与重试余量</td></tr>
+<tr><td>支撑视频接单</td><td class="num bad">不成立</td><td>720P 每小时 5–9 秒，接一个 15 秒的片子要 2–3 小时，且期间无法并行 OCR</td></tr>
+</table>
+
+<h3>0.5 硬件天花板与风险</h3>
+<table>
+<tr><th>#</th><th>约束</th><th>影响</th><th>处置</th></tr>
+<tr><td>1</td><td><b>16GB 显存上限</b></td><td>决定模型档位：图像可上生产档，视频只能低分辨率低量化，LLM 只能 27B Q3</td><td>接受它，把业务压在「图像 + OCR」这条 16GB 的舒适区</td></tr>
+<tr><td>2</td><td><b>31.2GB 内存上限</b></td><td>H3 需约 27GB，运行期余量仅约 4GB → 跑视频时无法并行 OCR，丧失最大收入项</td><td>视频只做离线自有内容，不与在线业务抢机器</td></tr>
+<tr><td>3</td><td><b>COW 非持久磁盘</b></td><td>H3 权重 27GB、27B 模型 14–17GB 每次重启重拉；按每天开关机 1 次算月流量 800GB+，重拉期间零收入</td><td>模型放<b>持久挂载盘</b>；OCR 组件零权重下载（模型随 pip 包内置），天然免疫此问题</td></tr>
+<tr><td>4</td><td><b>无订单 = 无收入</b></td><td>上述毛利均为「订单充足」下的理论峰值</td><td>先解决需求来源，再谈产能（见 0.6）</td></tr>
+</table>
+
+<h3>0.6 建议行动顺序</h3>
+<div class="note">
+<b>第一步（最高性价比）：部署 OCR 服务。</b>已有现成组件 <code>ocr/install.sh</code>——纯 CPU、模型随 pip 包内置（<b>零大文件下载，天然规避 COW 重启丢数据</b>）、systemd 开机自启、独立 venv 不污染系统。这是唯一「不占 GPU + 不需下载大模型 + 立刻能产生收入」的项。<br>
+<b>第二步：在同一批机器上叠加 GPU 图像生成</b>，与 OCR 并行跑，实现双线收入。<br>
+<b>第三步（可选）：H3 视频生成只用于自有内容运营</b>，不对外接单；若确需商用视频，应换 24GB+ 显存机型而非在本机硬撑。<br><br>
+<b>客户方向（本机最大差异化是「数据不出本地」）：</b><br>
+· 本地企业/机构（医院、律所、学校、政府）的<b>文档数字化</b>——数据合规是刚需，愿为私有化付溢价（云厂商 0.009–0.15 元/次，私有化可报 0.02–0.05 元/页）；<br>
+· 网吧自身客户的<b>增值服务</b>（AI 头像、游戏素材生成）——提升上座率而非直接创收；<br>
+· <b>不建议</b>：零售 token、按秒卖视频、与大厂拼 LLM 价格。<br><br>
+<b>一项值得评估的高价值补充：LoRA 微调服务。</b>16GB 显存足够训练 SDXL 级 LoRA，单次交付可报价数百元，单位时间收益远高于按张出图。属服务型业务（需与客户沟通），未纳入上表产能计算。
+</div>
+
+<p class="lede">取证日期 <span class="num">2026-10-13</span>（Asia/Shanghai）。取证通道：GitHub raw README 与 LICENSE 原文、厂商官方定价与计费文档、ModelScope 模型详情 API、PaddleOCR 官方文档站。HuggingFace 在本环境网络不可达，故所有权重链接均为官方 README 原文转录，<b>未逐个验证可下载性</b>。编写规则：<span class="hl">官方口径优先，社区数字单独标注，抓不到即写「未取证」，不推测、不凑数</span>。价格为抓取快照，厂商调价频繁，采购前请复核原页面。<br><span class="hl">所有对比表均支持点击表头排序</span>（升序 → 降序 → 恢复原序）：数值列按单元格内最大值排，文本列按字典序排，「未取证」恒排末位。</p>
+
+
+
+
+<h2 id="s1">一、定价逻辑：三类能力的计量骨架</h2>
+<table>
+<tr><th>能力</th><th>主计量单位</th><th>档位乘数</th><th>价格骨架</th></tr>
+<tr><td>文生图</td><td class="num">张 / 输出图 token / 积分 / 图点数</td><td>分辨率·质量·速度档·参考图</td><td>档位单价 × 张数 − 免费额度</td></tr>
+<tr><td>文生视频</td><td class="num">秒 × 分辨率 / 百万 token / 整条</td><td>分辨率·时长·音频·输入视频</td><td>元每秒 × 时长，分辨率做非线性乘数</td></tr>
+<tr><td>OCR</td><td class="num">次 / 页 / 千页 / 百万 token</td><td>接口难度·月调用量阶梯</td><td>阶梯单价 × 页数，量越大越便宜</td></tr>
+</table>
+<div class="note">
+四家国内厂商的「计价外衣」完全不同，内核一致：<span class="hl">先用一个抽象单位把成本包起来，再用档位把涨价讲得自然</span>。<br>
+· <b>百度千帆 = 积分制</b>：单位积分 0.025 元，文生图 8 积分 = 0.2 元/张，4K 16 积分 = 0.4 元<br>
+· <b>科大讯飞 = 图点数制</b>：按分辨率给点数（512×512 = 6、640×640 = 7、768×768 = 8、720×1280 或 1280×720 = 12、1024×1024 = 14 点），每点单价未公开落地<br>
+· <b>智谱 = 元/次</b>：GLM-Image 0.1 元、CogView-4 0.06 元（Batch 0.03）、CogView-3-Flash 免费<br>
+· <b>腾讯 / 阿里 / 火山 = 元/张 或 元/百万 token</b>：最透明<br>
+· <b>可灵 Kling = Unit 制</b>：视频 1 Unit = 0.14 美元，图像 1 Unit = 0.0035 美元<br>
+· <b>Stability / Runway = credits 制</b>：Runway 1 credit = 0.01 美元
+</div>
+
+<h2 id="s2">二、厂商 API 横向对比 · 国内</h2>
+<table>
+<tr><th>厂商</th><th>能力</th><th>计量单位与单价</th><th>免费额度 / 隐藏计费项</th></tr>
+<tr><td>阿里云百炼</td><td>文生图</td><td class="num">元/张：wanx2.0-t2i-turbo 0.04 / wan2.2-t2i-flash 0.14 / wan2.6-t2i 0.20 / wan2.7-image-pro 0.50；wan2.7-image 0.20</td><td>50–500 张/模型，<span class="hl">90 天有效</span></td></tr>
+<tr><td>阿里云百炼</td><td>文生视频</td><td class="num">元/秒：wan2.2-t2v-plus 480P 0.14 / 1080P 0.70；万相2.5-preview 480P 0.3·720P 0.6·1080P 1.0；wanx2.1-t2v-turbo 480P/720P 0.24</td><td>50–200 秒免费</td></tr>
+<tr><td>火山方舟</td><td>文生图</td><td class="num">元/张：seedream-5-0-flash 0.12 / 4-0 0.20 / 5-0-lite 0.22 / 4-5 0.25 / 5-0-pro 0.30（≤261 万像素）·0.60（&gt;261 万像素）</td><td>输入图首张免费、第 2 张起 0.02 元/张</td></tr>
+<tr><td>火山方舟</td><td>文生视频</td><td class="num">元/百万 token：Seedance 2.0 不含视频输入 46 / 含 28；1080p 51 / 31；4K 26 / 16；2.0-fast 37 / 22；2.0-mini 23 / 14；1.0-pro 在线 15 / 离线 7.5</td><td>在线推理（低优）约常规 50%；缓存 0.017 元/百万 token·小时；<span class="hl">生成失败不收费</span></td></tr>
+<tr><td>腾讯云混元生图</td><td>文生图</td><td class="num">元/张：3.0 = 0.2；2.0 = 0.5；极速版 0.099 → 0.094 → 0.088 → 0.066；资源包 1000 张 = 200 / 400 / 99 元</td><td>并发叠加包 <span class="hl">500 元/并发/天</span> 或 10000 元/并发/月；默认并发仅 1（图生图 3）；<b>资源包耗尽或到期不自动转后付费</b>；调用失败不计费</td></tr>
+<tr><td>百度千帆</td><td>文生图</td><td class="num">积分制（1 积分 = 0.025 元）：o1-base / V3-base / v3o 1K-2K = 8 积分 = 0.2 元/张；v3o 4K = 16 积分 = 0.4 元；智能补全主体图 20 积分 = 0.5 元；musesteamer-air-image 0.05 元/张</td><td>视频生成亦采用积分定价（蒸汽机 Air 单位积分价格 1 元/积分）</td></tr>
+<tr><td>智谱 BigModel</td><td>文生图</td><td class="num">元/次：GLM-Image 0.1 / CogView-4 0.06（Batch 0.03）/ CogView-3-Flash 免费</td><td>私有实例 100 元/算力单元/天；知识库容量 0.04 元/GB·小时</td></tr>
+<tr><td>智谱 BigModel</td><td>文生视频</td><td class="num">元/次：CogVideoX-3 1.0 / CogVideoX-2 0.5 / CogVideoX-Flash 免费；Vidu Q1 1080p 2.5 / Vidu2 720p 1.25</td><td>按次而非按秒，长视频成本不可控需注意</td></tr>
+<tr><td>MiniMax</td><td>文生图</td><td class="num">元/张：0.025（image-01 / image-01-live）</td><td>API-vlm 0.025 元/次；web_search 0.03 元/次</td></tr>
+<tr><td>MiniMax</td><td>文生视频</td><td class="num">元/秒：H3 768P 0.50 / 2K 0.80；H3-Max 480P 0.33 / 768P 0.50；再生成 768P→2K 0.30</td><td>失败或命中安全审核不扣费；<span class="hl">输入图 H3 前 5 张免费、超出 0.20 元/张</span>；音频输入免费；资源包不支持 H3；点数过期清零</td></tr>
+<tr><td>快手可灵 Kling</td><td>文生视频</td><td class="num">1 Unit = 0.14 美元：3.0 720P 0.6U（$0.084）/秒、1080P 0.8U（$0.112）/秒、4K 3.0U（$0.42）/秒；带原生音频 0.9U/秒（约 +50%）；Turbo 0.8/1.0U</td><td>电商场景 1.3–2.0U/秒；Motion Control 0.9–1.2U/秒；Avatar 0.4–0.8U/秒</td></tr>
+<tr><td>快手可灵 Kling</td><td>文生图</td><td class="num">1 Unit = 0.0035 美元：Image 3.0 8U（$0.028）/张、4K 16U（$0.056）；Image 2.1 文生图 4U（$0.014）</td><td>图生图 8U，比文生图贵一倍</td></tr>
+<tr><td>硅基流动 SiliconFlow</td><td>文生图 / 视频</td><td class="num">元/张：Z-Image-Turbo 0.10 / Z-Image 0.30；元/条：Wan2.2-I2V-A14B 2.00 / Wan2.2-T2V-A14B 2.00。国际站：FLUX.2 [pro] $0.03/张、[flex] $0.06/张、Z-Image-Turbo $0.005/张</td><td>1 美元免费额度；大批量可谈折扣；显式 AI 水印默认开启</td></tr>
+<tr><td>商汤日日新</td><td>文生图</td><td class="num">未取证。U1.5 Lite 接入 Token Plan，公测期每 5 小时 1500 次请求免费；无水印生成免费公测</td><td>公测免费额度无单价可算</td></tr>
+<tr><td>科大讯飞</td><td>文生图</td><td class="num">按图点数：512×512 = 6 / 768×768 = 8 / 1280×720 = 12 / 1024×1024 = 14 点（每点单价未取证）</td><td>生成图片自带隐式标识元数据</td></tr>
+<tr><td>腾讯云</td><td>OCR</td><td class="num">元/次：印刷体精简 0.08 / 标准 0.15 / 高精度 0.50；资源包 1000 次 = 120 元、1 万次 = 800 元、10 万次 = 5000 元</td><td>1000 次/月免费共享包；<span class="hl">部分失败错误码也计费</span>；境外 Region 不抵扣国内包；QPS 叠加包与并发买断包单列</td></tr>
+<tr><td>阿里云 OCR</td><td>OCR</td><td class="num">元/次阶梯：0.0825（≤1 万/月）→ 0.0495 → 0.0415 → 0.0248 → 0.009（&gt;100 万/月）</td><td>200 次/月免费；开通后付费不可关闭</td></tr>
+<tr><td>百度智能云</td><td>OCR</td><td class="num">元/次：通用识别次数包 1000 次 = 120 元；票据类阶梯 0.100 → 0.095 → 0.080 → 0.070；身份证金融加密版 0.030</td><td>个人 1000 / 企业 2000 次/月；<span class="hl">结果存储 0.01 元/GB·天</span>（默认存 30 天）；QPS 包 100–200 元/QPS/月</td></tr>
+<tr><td>智谱 BigModel</td><td>OCR</td><td class="num">OCR 解析工具 <span class="hl">0.01 元/页</span>（单次单页）；GLM-OCR 输入 0.2 / 输出 0.2 元/百万 token</td><td>知识库深度解析 0.12 元/页；GLM-OCR 不支持缓存</td></tr>
+</table>
+
+<h2 id="s3">三、厂商 API 横向对比 · 海外</h2>
+<table>
+<tr><th>厂商</th><th>能力</th><th>计量单位与单价</th><th>折扣 / 隐藏计费项</th></tr>
+<tr><td>OpenAI</td><td>文生图</td><td class="num">$/1M tokens：图像输出 $30、图像输入 $8、缓存输入 $2；文本输入 $5、缓存 $1.25</td><td>Batch 半价；区域驻留（数据驻留端点）+10%；web search $10/千次；容器 $0.03/GB 起</td></tr>
+<tr><td>Google Gemini</td><td>文生图</td><td class="num">按输出 token 折算：Nano Banana Pro 1K/2K ≈ $0.134、4K ≈ $0.24（输入图 $0.0011/张）；3.1 Flash Image 512 ≈ $0.045、1K $0.067、2K $0.101、4K $0.15；Imagen 4 $0.04/张</td><td>Batch 5 折；Priority 1.5 倍；Google Search 接地超 5000 次/月后 $14/千次</td></tr>
+<tr><td>Google Gemini</td><td>文生视频</td><td class="num">$/秒：Veo 3.1 Standard $0.40（720p/1080p）·$0.60（4K）；Fast $0.10（720p）·$0.12（1080p）·$0.30（4K）；Lite $0.05（720p）·$0.08（1080p）</td><td>同代模型档位差达 <span class="hl">8 倍</span></td></tr>
+<tr><td>Runway</td><td>文生视频</td><td class="num">credits（1 credit = $0.01）：Gen-4.5 12/秒、Gen-4 12/秒、Turbo 5/秒、Aleph 2.0 28/秒、Seedance 2 36–150/秒、Wan 3 5/10/20/秒（480p/720p/1080p）、veo3.1 40（含音频）/20（无音频）</td><td>ProRes/PNG 序列 +5 credits/秒；10-bit/HDR +20 credits/秒；图像放大 25 credits/张（&gt;4096px 收 150）；视频放大按帧 $0.007–0.012</td></tr>
+<tr><td>Runway</td><td>文生图</td><td class="num">gen4_image 5（720p）/8（1080p）；gen4_image_turbo 2；seedream5_pro 5（1K）/9（2K）；gemini_image3_pro 20（1K/2K）/40（4K）；nano_banana_2.1 4/6/12</td><td>订阅制折算：625 credits/月 ≈ 52 秒 Gen-4.5</td></tr>
+<tr><td>Luma</td><td>文生视频</td><td class="num">按条计价：540p T2V/I2V 5 秒 $0.15 起、10 秒 $0.45 起，高档至 $3.60；V2V 5 秒 $0.72–$2.16</td><td>计数单位是「条」不是「秒」，与按秒厂商不可直接比价</td></tr>
+<tr><td>Replicate</td><td>通用</td><td class="num">公开模型按<b>计算时间</b>：T4 $0.000225/秒、L40S $0.000975/秒、A100 80G $0.0014/秒、H100 $0.001525/秒、2×A100 $0.0028/秒</td><td><span class="hl">私有部署按实例在线全时计费（含启动与空闲）</span>；嵌套调用连下游模型一起计费；公开模型 setup 与 idle 免费</td></tr>
+<tr><td>Replicate</td><td>文生图 / 视频</td><td class="num">flux-1.1-pro $0.04/张、flux-dev $0.025/张、flux-schnell $3/千张、ideogram-v3-quality $0.09/张、recraft-v3 $0.04/张；wan-2.1-i2v 480p $0.09/秒、720p $0.25/秒</td><td>企业量级折扣未公布</td></tr>
+<tr><td>fal.ai</td><td>通用</td><td class="num">四种单位并存：<b>张 / 百万像素 / 视频秒 / 整条视频</b>；无固定输出价的模型<span class="hl">回落按 GPU 秒计费</span>。flux/dev $0.025/张；Nano Banana Pro $0.15/张、Nano Banana 2 $0.08/张；Flux 3 edit $0.024/MP；Z Image Turbo $0.005/MP；Kling v3 Pro $0.14/秒、v2.5-turbo Pro $0.07/秒</td><td>只对成功输出计费，排队与服务器错误不计费；credits 同时决定并发上限；自定义部署 GPU $1.99–$12.99/小时</td></tr>
+<tr><td>Stability AI</td><td>文生图</td><td class="num">credits：SD3.5 Flash 2.5 / Core 3 / Medium 3.5 / Large 6.5 / Image Ultra 8 / SDXL 1.0 自 0.9；控制类 Structure·Sketch·Style Guide 各 5、Style Transfer 8、Inpaint 5、Remove Background 5</td><td>SDXL 1.0 为最便宜档（旧模型）</td></tr>
+<tr><td>Black Forest Labs</td><td>文生图 / 视频</td><td class="num">计算器默认档：FLUX 3 Image 768×768 = $0.048/张；FLUX 3 视频 17/秒（Runway 渠道）；完整公开阶梯表未取到</td><td>Open Weights 许可分档（Builder/Platform/Professional/Enterprise，10K–100K images/月）；企业量产走定制报价</td></tr>
+<tr><td>Azure Document Intelligence</td><td>OCR</td><td class="num">$/1000 页：Read $1.50（&gt;100 万页 $0.60）/ Prebuilt $10 / 自定义分类 $3 / <span class="hl">自定义抽取 $30</span> / Query Fields $10 / Add-on $6</td><td>容器与云同价；承诺档 Read $375/50 万页起、自定义抽取 $540/2 万页起；同厂商内 Read 与自定义抽取差 <span class="hl">20 倍</span></td></tr>
+<tr><td>AWS Textract</td><td>OCR</td><td class="num">$/页：Detect Document Text $0.0015（&gt;100 万页 $0.0006）/ Tables $0.015 / Forms $0.05 / Tables+Forms+Queries $0.070 / Queries $0.015 / Signatures $0.0035 / Expense $0.01 / AnalyzeID $0.025 / Lending $0.07</td><td>前 3 个月免费额度按接口分列；多个功能可叠加计费；无错误计费</td></tr>
+<tr><td>Google Cloud Vision</td><td>OCR</td><td class="num">$/1000 units：前 1000/月免费；1001–500 万 $1.50；500 万以上 $0.60</td><td><span class="hl">多页 PDF 每页各算一次；每启用一个 feature 各算一个 unit</span></td></tr>
+<tr><td>Azure AI Vision</td><td>OCR</td><td class="num">$/1000 transactions：Read 等 Group 2 为 0–1M $1.50、1M+ $0.60；OCR 等 Group 1 为 0–1M $1.00、1–10M $0.65、10–100M $0.60、100M+ $0.40</td><td>F0 免费层 5000 transactions/月；多页 PDF 每页算一次；异步 Read 结果 GET 计次但免费</td></tr>
+</table>
+
+<h2 id="s4">四、四个隐藏分歧（比价时最容易算错的地方）</h2>
+<div class="note">
+<b>① 阶梯算法完全不同：腾讯是「阶梯到达」，百度是「分段累计」。</b><br>
+腾讯原文：后付费采取阶梯到达的计费方式，当月的接口总用量达到某个阶梯后，<b>当月用量按该阶梯的单价进行计费</b>。官方算例：20 万次 × 0.088 = 17600 元，整月统一按最低档单价。<br>
+百度算例：15 万次 = 2 万×0.100 + 3 万×0.095 + 5 万×0.080 + 5 万×0.070 = 12350 元，逐级累加。<br>
+同一个「月调用量阶梯」，两家算法不同，用量越大差额越大。<br><br>
+
+<b>② 计费时间的口径：输出秒数 vs GPU 计算秒数。</b><br>
+按秒计费时，「秒」可能指输出视频时长，也可能指 GPU 实际运行时长，两者可差 2–3 倍。Replicate 定义更明确：公开模型只算 active 处理时间（setup 与 idle 免费），私有部署与 deployment 则连 setup、idle、active 全时计费。<br><br>
+
+<b>③ 失败与并发的处理是隐性成本。</b><br>
+火山方舟、腾讯混元生图、MiniMax 均明示「生成失败不收费」；但<span class="hl">腾讯 OCR 明确「部分失败错误码也计费」</span>。并发上，腾讯混元生图默认仅 1 并发，要提并发须买 500 元/并发/天 或 10000 元/并发/月——这一项常常比图片本身还贵。腾讯还规定资源包耗尽或到期后<b>不会自动转后付费</b>，必须手动开通，否则调用直接失败。百度侧则需另购 QPS 叠加包（100–200 元/QPS/月）。<br><br>
+
+<b>④ 牌价与主供应商报价能差一倍。</b><br>
+同一 1080p 文生视频：聚合器牌价 Seedance 2.0 $0.34/秒，主供应商 BytePlus 报 $0.31/秒；而 Wan 2.7 只要 $0.15/秒。8 秒 1080p 一条：Seedance $2.72 vs Wan $1.20。另外同一模型在不同平台用不同口径计价（火山按元/百万 token、fal.ai 按 $/1000 tokens、Runway 按 credits/秒），<span class="hl">三种口径不可直接换算</span>。
+</div>
+
+<h2 id="s5">五、家用机可跑模型全集 · 图像（文生图 / 图生图 / 编辑）</h2>
+<p class="sub">「官方」= 厂商 README 或 LICENSE 明写；「社区」= 第三方量化或推理引擎口径；「未取证」= 官方未公布且本报告不填社区估算。<br>
+<b>热度</b>列 = HuggingFace 近 30 天下载量 / GitHub stars（★）/ ModelScope 下载量，三平台并列不合并。<br>
+<b>能力</b>列 = <b>Artificial Analysis AA-Image-T2I v2.0</b> 的 Elo 分（业界最常引用的人偏好榜），榜内锚点 FLUX.2 [dev] 固定为 1000；标「编辑榜」者为 AA-Image-Editing v2.0。<span class="hl">热度与能力均取自第三方，跨榜不可换算</span>；抓取日 2026-10-14。</p>
+<table data-sorthint="热度按 HuggingFace 近 30 天下载量排；无 HF 权重仓的纯 GitHub 项目排末位（其 stars 见单元格）。能力按 AA-Image-T2I Elo 排，仅有编辑榜分数的用编辑榜 Elo。">
+<tr><th>机构</th><th>模型</th><th>参数</th><th>家用机显存要求（口径）</th><th>许可</th><th>热度</th><th>能力（Elo）</th><th>API 售卖方</th></tr>
+<tr><td>阿里 Qwen</td><td>Qwen-Image-2.1（2026-09 开源）</td><td class="num">7B DiT + Qwen3-VL 8B 文本编码器 + RGBA VAE</td><td class="num">官方未给。文件级：DiT BF16 14.23GB / INT8 7.26GB；编码器 BF16 17.53GB / INT8 9.35GB / W4A8 6.31GB；VAE 0.68GB。<span class="tag">社区</span> 24GB 走 INT8 组合约 16.1GiB 常驻；16GB 峰值 13.9–15GB（1024² 约 20 秒）；12GB 走 Q8_0 + W4A8；8GB 走 Q4/Q5 仅文生图，带参考图改图易崩；Mac 需 32GB+ 统一内存</td><td>未取证</td><td class="num" data-sort="147995">HF 14.8万/月<br>Comfy 重打包 940万/月<br>MS 5.1万</td><td class="num hl" data-sort="1037">1037<br>开源权重第 1<br>编辑榜 1074</td><td class="apiv">原厂：阿里云百炼 <code>qwen-image-2.1-pro/turbo</code><br><span class="m">第三方未取证</span></td></tr>
+<tr><td>阿里 Qwen</td><td>Qwen-Image（初代）</td><td class="num">20B MMDiT</td><td class="num"><span class="tag">社区</span> DiffSynth-Studio 称分层 offload 可 4GB 内推理</td><td>Apache-2.0</td><td class="num" data-sort="270849">★8.4k<br>HF 27.1万/月（总 320万）<br>MS 297万</td><td class="num" data-sort="891">891<br>编辑榜 920</td><td class="apiv">第三方：硅基流动 <code>Qwen/Qwen-Image</code> ¥0.30/图<br><span class="g">百度千帆 <code>qwen-image</code></span>（百度卖阿里模型）<br><span class="m">PPIO 已于 2026-09-30 下线</span></td></tr>
+<tr><td>黑森林 BFL</td><td>FLUX.2 [klein] 4B / 4B Base</td><td class="num">4B + Qwen3 4B</td><td class="num"><span class="tag">官方</span> ≈8GB（RTX 3090/4070 及以上）；sub-second 生成</td><td><span class="hl">Apache-2.0</span>（全家族唯一可商用）</td><td class="num" data-sort="416307">HF 41.6万/月（总 328万）<br>GGUF 35.3万/月</td><td class="num" data-sort="863">863<br>Base 795<br>编辑榜 950</td><td class="apiv">原厂：BFL 官方 API（klein 系列）<br><span class="m">硅基流动仅售 [pro]/[flex]，无 klein</span></td></tr>
+<tr><td>黑森林 BFL</td><td>FLUX.2 [klein] 9B / 9B KV</td><td class="num">9B + Qwen3 8B</td><td class="num"><span class="tag">社区</span> FP8 ≈15GB（16GB 卡舒适区）；9B KV 靠 KV 缓存加速多参考图编辑</td><td>FLUX 非商业许可</td><td class="num" data-sort="185677">HF 18.6万/月（总 166万）<br>GGUF 37.3万/月</td><td class="num" data-sort="941">941<br>Base 903<br>编辑榜 1013</td><td class="apiv">原厂：BFL 官方 API（klein 9B / 9B KV）</td></tr>
+<tr><td>黑森林 BFL</td><td>FLUX.2 [dev]</td><td class="num">32B dense（文本编码器 Mistral-Small-24B）</td><td class="num"><span class="tag">官方</span> 需 H100 级显存；与 HF 合作提供量化版，官方给出 <b>RTX 4090 + remote text encoder</b> 跑法。<span class="tag">社区</span> BF16 ≈64GB / FP8 ≈32GB / GGUF Q4_K_S ≈19GB；DiffSynth 称最低 10GB 可运行</td><td>FLUX 非商业许可</td><td class="num" data-sort="404128">HF 40.4万/月（总 501万）<br>MS 12.0万</td><td class="num" data-sort="1000">1000<br>（榜面锚点）<br>编辑榜 1000</td><td class="apiv">原厂：<span class="r">BFL 官方不卖 [dev]</span><br><span class="m">官方定价页原文：Local only ｜ Open weights, non-commercial（no hosted API）；官方端点清单亦无 flux-2-dev</span><br>第三方：Replicate $0.012/MP（go_fast）·$0.014/MP、fal $0.012/MP、Together $0.0154+/图、Cloudflare Workers AI <code>flux-2-dev</code></td></tr>
+<tr><td>黑森林 BFL</td><td>FLUX.1 [schnell] / [dev] / Kontext [dev] / Krea [dev]</td><td class="num">12B</td><td class="num"><span class="tag">社区</span> nunchaku 4-bit 最低 <span class="hl">4GiB</span>（4-bit 文本编码器 + 逐层 CPU offload）；12B FLUX 显存降 3.6×</td><td>schnell = Apache-2.0；dev 系非商业</td><td class="num" data-sort="646799">★26.0k<br>HF dev 64.7万/月（总 3417万）<br>schnell 59.1万/月（总 2335万）</td><td class="num" data-sort="841">dev 841<br>schnell 803<br>Krea 847</td><td class="apiv">原厂：BFL 官方仅 <code>/v1/flux-dev</code>（legacy，价格未列）；<span class="hl">[schnell] 不在官方端点清单</span><br>第三方：硅基流动 dev $0.014/图、schnell $0.0014/图；Replicate dev $0.025/图；fal dev $0.025/MP、schnell $0.003/MP；Fireworks dev $0.014/图、schnell $0.0014/图；DeepInfra、UCloud、Cloudflare</td></tr>
+<tr><td>NVIDIA</td><td>SANA 0.6B / 1.6B / SANA-1.5 1.6B·4.8B / SANA-Sprint</td><td class="num">0.6B–4.8B</td><td class="num"><span class="tag">官方</span> 4-bit 量化 + Nunchaku <span class="hl">低于 8GB</span>；4K 全精度 22GB → 量化 + offload 后 8GB 内；SANA-Sprint 在 H100 上 1024px 仅 0.1 秒</td><td>Apache-2.0（2025-01-11 代码许可改为 Apache 2.0）</td><td class="num" data-sort="1068">★9.3k<br>HF 1,068/月</td><td class="num" data-sort="754">Sprint 754</td><td class="apiv">原厂：<span class="r">无托管 API</span>（build.nvidia.com/nvidia/sana 返回 404）<br>第三方：Replicate <code>nvidia/sana-sprint-1.6b</code> $0.0098/run、<code>nvidia/sana</code> $0.25/run；fal sana $0.001/MP、sana/sprint $0.0025/MP</td></tr>
+<tr><td>Stability</td><td>SD 1.5 / 2.1 / SDXL 1.0 / SDXL-Turbo</td><td class="num">约 1B / 3.5B</td><td class="num"><span class="tag">社区</span> SD1.5 约 4GB；SDXL 官方 8GB、实测 6GB、推荐 12GB（含 Refiner 16GB），系统内存 16GB、磁盘约 7GB</td><td>CreativeML Open RAIL++-M</td><td class="num" data-sort="4305751">★27.3k<br>HF 430.6万/月<br>（总 1.27亿）</td><td class="num" data-sort="678">678</td><td class="apiv">原厂：Stability 官方 API（SDXL 自 0.9 credits ≈ $0.009）<br>第三方：Replicate ≈$0.0029/run；Together $0.0019+/图；硅基流动<br><span class="m">Bedrock 有 stability.sd3-5-large-v1:0 与 Stable Image Core（SDXL 增强版）；SDXL 1.0 base 在 Bedrock 现状未取证</span></td></tr>
+<tr><td>Stability</td><td>SD 3.5 Large / Large-Turbo / Medium + ControlNets</td><td class="num">8B / 2.5B</td><td class="num"><span class="tag">社区</span> 中等档需 12–16GB 级</td><td>代码 MIT；权重许可未取证</td><td class="num" data-sort="48907">HF 4.9万/月（总 261万）</td><td class="num" data-sort="840">840</td><td class="apiv">原厂：Stability 官方 API（6.5 credits ≈ $0.065）<br>第三方：<span class="g">AWS Bedrock</span> <code>stability.sd3-5-large-v1:0</code>；Replicate $0.065/图；fal $0.065/MP</td></tr>
+<tr><td>智谱</td><td>CogView4-6B</td><td class="num">6B</td><td class="num"><span class="tag">官方</span> 20GB（CPU offload）/ 13–14GB（文本编码器 4bit）/ 33–39GB（无 offload，batch=4）</td><td>Apache-2.0</td><td class="num" data-sort="3250">HF 3,250/月（总 175万）<br>MS 8,054</td><td class="num" data-sort="">OneIG 0.446</td><td class="apiv">原厂：智谱 <code>CogView-4</code> 0.06 元/次（Batch 0.03）</td></tr>
+<tr><td>腾讯</td><td>HunyuanImage-3.0 / -Instruct / -Distil</td><td class="num">80B 总 / 13B 激活</td><td class="num"><span class="tag">官方</span> ≥3×80GB（Base）、<span class="hl">≥8×80GB</span>（Instruct / Distil）——家用机排除</td><td>未取证</td><td class="num" data-sort="2831">HF 2,831/月（总 247万）<br>Instruct 2.2万/月</td><td class="num" data-sort="1068">编辑榜 1068<br>（Instruct）</td><td class="apiv">原厂：腾讯云 TokenHub <code>hy-image-v3</code><br><span class="m">与开源权重是否同一套未取证</span></td></tr>
+<tr><td>字节 Seed</td><td>BAGEL（统一理解 + 文生图）</td><td class="num">7B 激活 / 14B 总</td><td class="num"><span class="tag">官方</span> 32GB+ 推荐；12–32GB 建议 NF4 量化；22–32GB 不建议 INT8</td><td>Apache-2.0</td><td class="num" data-sort="1267">★6.2k<br>HF 1,267/月</td><td class="num" data-sort="705">705</td><td class="apiv"><span class="y">未取证</span>（字节未在方舟上架；方舟图像全为闭源 Seedream 系）</td></tr>
+<tr><td>快手</td><td>Kolors</td><td class="num">未取证</td><td class="num">未取证（README 无显存表）</td><td><span class="hl">代码 Apache-2.0；权重仅学术开放，商用需登记（≤3 亿 MAU 自动授权）</span></td><td class="num" data-sort="827">HF 827/月<br>MS 51.4万</td><td class="num" data-sort="">OneIG 0.434</td><td class="apiv">第三方：硅基流动 <code>Kwai-Kolors/Kolors</code>（免费/图）<br><span class="m">快手原厂 API 未取证</span></td></tr>
+<tr><td>阶跃星辰</td><td>Step1X-Edit</td><td class="num">未取证</td><td class="num"><span class="tag">官方</span> 峰值 42.5 / 46.5 / 49.8GB（512 / 786 / 1024）；FP8 31 / 31.5 / 34GB；24GB 单卡仅支持 LoRA 微调</td><td>未取证</td><td class="num" data-sort="238">HF 238/月</td><td class="num" data-sort="925">编辑榜 925</td><td class="apiv">第三方：UCloud ModelVerse <code>stepfun-ai/step1x-edit</code><br><span class="m">阿里云 PAI 仅「一键部署」，非现成 API</span></td></tr>
+<tr><td>上海 AI Lab</td><td>Lumina-Image-2.0</td><td class="num">2.6B</td><td class="num">未取证（README 仅建议 enable_model_cpu_offload）</td><td>未取证</td><td class="num" data-sort="1234">★899<br>HF 1,234/月</td><td class="num" data-sort="782">782<br>OneIG 0.353</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>上海 AI Lab</td><td>InternVL-U（理解 + 生成 + 编辑）</td><td class="num">4B</td><td class="num">未取证</td><td>MIT</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>DeepSeek</td><td>Janus-1.3B / JanusFlow-1.3B</td><td class="num">1.3B</td><td class="num">未取证（极小体量，家用无压力）</td><td>代码 MIT / 模型 Model Agreement</td><td class="num" data-sort="1992">★17.8k<br>HF 1,992/月</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>Apple</td><td>ml-stable-diffusion（SD1.x/2.x/XL → Core ML）</td><td class="num">未取证</td><td class="num">未取证（README 给 Apple 设备基准，非显存口径）</td><td>MIT</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（Apple 仅提供 Core ML 转换工具，本地运行）</td></tr>
+<tr><td>Stability</td><td>Stable Virtual Camera（相机轨迹 / 新视角）</td><td class="num">未取证</td><td class="num">未取证</td><td>Stability 非商业许可</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>MIT HAN Lab</td><td>Nunchaku / SVDQuant 4-bit 推理引擎</td><td class="num">支持 FLUX / Sana / Qwen-Image 等</td><td class="num"><span class="tag">官方</span> FLUX 最低 <span class="hl">4 GiB</span>；12B FLUX 显存降 3.6×</td><td>未取证</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（开源推理引擎，自托管）</td></tr>
+<tr><td>社区 city96</td><td>ComfyUI-GGUF</td><td class="num">—</td><td class="num">未取证（README 无 GB 数）</td><td>Apache-2.0</td><td class="num" data-sort="182230">HF GGUF 18.2万/月</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（量化工具，自托管）</td></tr>
+<tr><td>社区 kijai</td><td>ComfyUI-WanVideoWrapper / KJNodes / SUPIR / CogVideoXWrapper</td><td class="num">—</td><td class="num">未取证（README 路径 404）</td><td>未取证</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（ComfyUI 节点，自托管）</td></tr>
+<tr><td>社区</td><td>Pony Diffusion / SDXL 微调生态</td><td class="num">—</td><td class="num">未取证（Civitai 通道不可达）</td><td>未取证</td><td class="num" data-sort="237585">HF 23.8万/月<br>（LyliaEngine 镜像）</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无官方 API</span>（社区生态）<br>第三方：fal <code>pony-v7</code> $0.03/MP<br><span class="m">注意 fal 上架的是 V7；Replicate 仅社区版（charlesmccarthy/pony-sdxl 等），价格未取证</span></td></tr>
+</table>
+<div class="note"><b>「API 售卖方」列的四类取值：</b><br>
+<span class="g">原厂在售</span>＝模型原厂自己卖该权重（如 BFL 卖 FLUX.2 [klein]、Stability 卖 SD3.5）；<br>
+<span class="g">第三方托管</span>＝平台确实跑该开源权重（Replicate / fal.ai / Together / Fireworks / DeepInfra / 硅基流动 / UCloud / Cloudflare / Bedrock / Azure 等）；<br>
+<span class="y">仅自托管</span>＝无任何现成 API，只能自己部署（FramePack、Wan2GP、ComfyUI 本地、NVIDIA NIM 容器）；<br>
+<span class="r">同名非此权重</span>＝原厂有同名 API 但卖的是闭源版（阿里 <code>wan2.2-i2v-plus</code> ≠ 开源 A14B；智谱 <code>CogVideoX-3</code> ≠ 开源 2B/5B；火山方舟图像视频全为闭源）。<br><br>
+<b>两个容易误判的点：</b><br>
+① <b>「一键部署」不是「在售 API」</b>——Vertex AI Model Garden 的 FLUX.1-schnell 是部署到你自己的 GPU 端点（xDiT 容器），按算力计费而非按张计费；阿里云 PAI 的 Step1X-Edit 同理。<br>
+② <b>云厂商上架的常是闭源代际</b>——Azure AI Foundry 只有 Flux 1.1 Pro / Kontext Pro / Flux 2 Pro / Flex（闭源线），<span class="hl">没有 dev / klein</span>；Bedrock 有 Stability 但只到 sd3-5-large 与 Stable Image Core。<br><br>
+<b>取证时点：</b>2026-10-14。平台上下架频繁（如 PPIO 已于 2026-09-30 下线 Qwen-Image 与 Wan 系列、Stability 已下架 SVD API），采购前请复核。</div>
+
+<div class="note"><b>能力列怎么读：</b>AA 榜前 19 名<b>全是闭源</b>（GPT Image 2.5 Sunburst 1199、Nano Banana 2.1 1159、Grok Imagine 2.0 1155），<span class="hl">最强开源 Qwen-Image-2.1 也只排到第 20（1037）</span>。同分不同名次（如 FLUX.1 [dev] 841 与 SD3.5 Large 840）在 ±7–9 的置信区间内，属统计上不可区分，不要过度解读名次差。<br>
+<b>热度列怎么读：</b>HF 下载量是<b>文件级请求计数</b>，不等于独立用户；ComfyUI 重打包仓会被显著放大（Qwen-Image-2.1 原仓 14.8 万/月，而 Comfy 重打包仓 940 万/月，差 63 倍）。看「谁在被真正使用」建议优先看 <b>GitHub stars</b> 与 <b>ModelScope 下载量</b>，HF 数字看趋势即可。</div>
+
+<h2 id="s6">六、家用机可跑模型全集 · 视频（文生 / 图生 / 语音驱动）</h2>
+<p class="sub"><b>能力</b>列优先取 <b>VBench-1.0 Total Score</b>（视频生成最权威基准）。注意口径：VBench 官方榜只发布归一化雷达图、无数字总表，故表中数值均为各模型论文 / 官方 README 转引，<b>不是榜面直读</b>；标「长 prompt 版」与「标准版」为两套 prompt 套件，分数不可互比。另有 PAI-Bench、官方内部 rating 等口径，均单独标注。</p>
+<table data-sorthint="热度按 HuggingFace 近 30 天下载量排；无 HF 权重仓的项目排末位。能力按 VBench-1.0 Total Score 排，无 VBench 分数的（如官方 rating、PAI-Bench 口径）排末位——不同榜不可换算。">
+<tr><th>机构</th><th>模型</th><th>参数</th><th>家用机显存要求（口径）</th><th>许可</th><th>热度</th><th>能力</th><th>API 售卖方</th></tr>
+<tr><td>阿里 Wan</td><td><span class="hl">Wan2.1-T2V-1.3B</span></td><td class="num">1.3B</td><td class="num"><span class="tag">官方</span> 仅需 <span class="hl">8.19GB</span>，「兼容几乎所有消费级显卡」；RTX 4090 生成 5 秒 480P 约 4 分钟</td><td>Apache-2.0</td><td class="num" data-sort="51838">★17.2k（Wan2.1）<br>HF 5.2万/月（总 43.7万）<br>MS 829万</td><td class="num" data-sort="">未取证<br>（同系 14B 为 83.7）</td><td class="apiv"><span class="y">原厂未上架该尺寸</span>（百炼未列 1.3B）<br>第三方：<span class="y">未取证</span>（硅基流动有 14B 无 1.3B）</td></tr>
+<tr><td>阿里 Wan</td><td>Wan2.2-TI2V-5B</td><td class="num">5B（高压缩 VAE，720P@24fps）</td><td class="num"><span class="tag">官方</span> ≥24GB（即 4090 档）；单卡 5 秒 720P 少于 9 分钟；<span class="tag">社区</span> Q3 GGUF + 64GB 内存可下探 16GB 卡</td><td>Apache-2.0</td><td class="num" data-sort="21376">★17.9k<br>HF 2.1万/月（总 14.8万）<br>MS 801万</td><td class="num" data-sort="">未取证<br>（官方未给总分）</td><td class="apiv"><span class="y">未取证</span>（百炼在售为 wan2.2-i2v-plus 闭源线）</td></tr>
+<tr><td>阿里 Wan</td><td>Wan2.2-T2V / I2V-A14B</td><td class="num">27B 总 / 14B 激活 MoE</td><td class="num"><span class="tag">官方</span> 单卡需 ≥80GB</td><td>Apache-2.0</td><td class="num" data-sort="10050">★17.9k<br>HF T2V 4,650/月<br>I2V 1.0万/月</td><td class="num" data-sort="">官方 rating<br>指令 44.07 / 美学 65.98</td><td class="apiv"><span class="r">原厂同名但非此权重</span>：百炼 <code>wan2.2-i2v-plus</code> 属闭源 plus 线<br>第三方：<span class="g">硅基流动</span> <code>Wan-AI/Wan2.2-T2V-A14B</code>、<code>I2V-A14B</code> ¥2.00/条</td></tr>
+<tr><td>阿里 Wan</td><td>Wan2.2-S2V-14B / Animate-14B / Wan-Dancer / Wan-Animate-2</td><td class="num">14B</td><td class="num"><span class="tag">官方</span> S2V ≥80GB；其余未取证</td><td>Apache-2.0</td><td class="num" data-sort="164864">HF Animate 16.5万/月<br>（总 56.1万）</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span>（Animate 等衍生模型未见托管）</td></tr>
+<tr><td>腾讯</td><td><span class="hl">HunyuanVideo-1.5</span></td><td class="num">8.3B</td><td class="num"><span class="tag">官方</span> 最低 <span class="hl">14GB</span>（开启 model offloading），明示 runs smoothly on consumer-grade GPUs；RTX 4090 单卡 480p 图生视频（步数蒸馏）约 75 秒。<span class="tag">社区</span> Wan2GP 称最低 6GB</td><td>Tencent Hunyuan Community License（<span class="hl">排除欧盟 / 英国 / 韩国</span>；&gt;1 亿 MAU 需单独授权）</td><td class="num" data-sort="1325">HF 1,325/月（总 81万）<br>MS 1.9万</td><td class="num" data-sort="">官方 rating<br>指令 61.57 / 美学 63.30<br>（指令高于 Wan2.2 44.07）</td><td class="apiv"><span class="y">原厂 API id 未取证</span>（官网有 playground）</td></tr>
+<tr><td>腾讯</td><td>HunyuanVideo（1.0）</td><td class="num">13B</td><td class="num"><span class="tag">官方</span> 720×1280 峰值 60GB、544×960 45GB，建议 80GB</td><td>未取证</td><td class="num" data-sort="1907">★12.6k<br>HF 1,907/月（总 5.6万）<br>MS 1.1万</td><td class="num hl" data-sort="83.24">VBench 83.24<br>（标准版表内第 1）</td><td class="apiv"><span class="y">原厂 model id 未取证</span>（腾讯云「混元生视频」产品存在）</td></tr>
+<tr><td>腾讯</td><td>HunyuanVideo-I2V</td><td class="num">未取证</td><td class="num"><span class="tag">官方</span> 720p 最低 60GB</td><td>未取证</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>智谱</td><td>CogVideoX-2B</td><td class="num">2B</td><td class="num"><span class="tag">官方</span> diffusers FP16 最低 <span class="hl">4GB</span>、INT8 3.6GB；SAT FP16 18GB</td><td>Apache-2.0</td><td class="num" data-sort="16117">★13.1k（CogVideo）<br>HF 1.6万/月（总 109万）</td><td class="num" data-sort="80.91">VBench 80.91</td><td class="apiv"><span class="r">原厂在售为 <code>CogVideoX-3</code>（1 元/次），与开源 2B/5B/1.5 版本关系未取证</span></td></tr>
+<tr><td>智谱</td><td>CogVideoX-5B / 5B-I2V</td><td class="num">5B</td><td class="num"><span class="tag">官方</span> diffusers BF16 最低 <span class="hl">5GB</span>、INT8 4.4GB；SAT BF16 26GB</td><td><span class="hl">5B 起不再是 Apache</span>，走 CogVideoX 自有许可</td><td class="num" data-sort="14722">HF 1.5万/月（总 149万）<br>MS 2.4万</td><td class="num" data-sort="81.61">VBench 81.61</td><td class="apiv"><span class="r">同上：智谱卖 CogVideoX-3，非 5B 权重</span></td></tr>
+<tr><td>智谱</td><td>CogVideoX1.5-5B / 1.5-5B-I2V</td><td class="num">5B（10 秒、任意分辨率图生视频）</td><td class="num"><span class="tag">官方</span> diffusers BF16 起 10GB、INT8 起 7GB；SAT BF16 76GB</td><td>CogVideoX 许可</td><td class="num" data-sort="987">HF 987/月（总 19.4万）</td><td class="num" data-sort="82.17">VBench 82.17</td><td class="apiv"><span class="r">同上</span></td></tr>
+<tr><td>Lightricks</td><td>LTX-Video 0.9.x（2B / 13B，含 fp8 与 distilled）</td><td class="num">2B / 13B</td><td class="num">官方<b>未公布显存</b>，仅定性描述「13B-dev 需更多显存、distilled 更少、2B distilled 轻量」。<span class="tag">社区</span> 官方 README 收录的 LTX-VideoQ8（8-bit 优化）在 RTX 4060 8GB 上 1 分钟内生成 720×480×121；13B-fp8 约 14.62GiB 为 24GB 卡舒适区；distilled LoRA 适配器自身 1GB（须配合 13B 全模型使用）</td><td>OpenRail-M（v0.9.5 起可商用）</td><td class="num" data-sort="683845">★11.1k<br>HF 68.4万/月（总 893万）</td><td class="num" data-sort="80.0">VBench 80.00</td><td class="apiv">原厂：<span class="r">官方 API 不含 0.9.x</span>（现役仅 ltx-2-5 / ltx-2-3 系列）<br>第三方：Replicate <code>ltx-video</code> ≈$0.056/run；fal $0.02/video</td></tr>
+<tr><td>Lightricks</td><td>LTX-2 / LTX-2.5</td><td class="num">22B transformer + Gemma 系编码器</td><td class="num"><span class="tag">官方</span> 未给显存；权重约 66GiB，需 fp8-cast + offload。ComfyUI-LTXVideo 官方前置要求为 <span class="hl">CUDA 32GB+ 显存、100GB+ 磁盘</span>。22B bf16 39.13GiB / NVFP4 17.44GiB / int8 20.03GiB；19B bf16 40.31GiB / FP8 25.22GiB / NVFP4 18.62GiB</td><td>LTX-2.x Community License（2026-08-11）</td><td class="num" data-sort="271549">★9.7k<br>HF 27.2万/月（总 879万）</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：Lightricks 官方 API 现役为 <code>ltx-2-5-fast/pro</code>、<code>ltx-2-3-fast/pro</code><br><span class="hl">LTX-2 原版不在官方 API 列表</span>，只走第三方：Replicate <code>lightricks/ltx-2-pro</code> $0.06/秒@1080p、fal <code>fal-ai/ltx-2</code> $0.06/秒</td></tr>
+<tr><td>昆仑万维</td><td>SkyReels-V2-1.3B-540P</td><td class="num">1.3B</td><td class="num"><span class="tag">官方</span> 540P 生成峰值约 <span class="hl">14.7GB</span></td><td>未取证</td><td class="num" data-sort="159">★7.6k</td><td class="num hl" data-sort="83.9">VBench 83.9<br>（长 prompt 版表内第 1）</td><td class="apiv"><span class="y">未取证</span>（昆仑万维 API 未查到）</td></tr>
+<tr><td>昆仑万维</td><td>SkyReels-V2-14B / SkyReels-V1</td><td class="num">14B</td><td class="num"><span class="tag">官方</span> V2-14B 540P 约 51.2GB、另一档 43.4GB；V1 在 4090 全优化下 544×960×97f 峰值 18.5GB</td><td>未取证</td><td class="num" data-sort="">★7.6k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>Genmo</td><td>Mochi 1 preview</td><td class="num">10B AsymmDiT</td><td class="num"><span class="tag">官方</span> 约 60GB 单卡；<span class="hl">ComfyUI 优化后低于 20GB</span></td><td>Apache-2.0</td><td class="num" data-sort="8822">★3.8k<br>HF 8,822/月（总 40.5万）</td><td class="num" data-sort="80.13">VBench 80.13</td><td class="apiv">原厂：<span class="r">Genmo 无一方 API</span>（官网仅提供开源 clone 指引）<br>第三方：Replicate ≈$0.42/run；fal <code>mochi-v1</code> $0.4/video <span class="m">（已标记 deprecated）</span></td></tr>
+<tr><td>NVIDIA</td><td>SANA-Video 2B / SANA-Video 2.0 5B（14B 架构已放权重未含）</td><td class="num">2B / 5B</td><td class="num"><span class="tag">官方</span> 视频侧显存未公布；图像侧官方口径为 4-bit 低于 8GB。性能：720p 单 H100 延迟 SANA-Video-2B <b>36 秒</b>、SANA-Video 2.0 5B 在 480×832×81 下 <b>13.2 秒</b></td><td>Apache-2.0</td><td class="num" data-sort="44">★9.3k<br>HF 44/月</td><td class="num" data-sort="84.17">VBench 84.17<br>（自报，Q 84.85 / S 81.46）</td><td class="apiv"><span class="r">无现成托管 API</span>（NVIDIA / fal / Replicate 均未查到 SANA-Video 托管端点）</td></tr>
+<tr><td>NVIDIA</td><td>Cosmos-Predict2.5（2B / 14B）/ SANA-WM / SANA-Streaming / LongSANA</td><td class="num">2B / 2.6B / 14B</td><td class="num">未取证（README 无显存数字）</td><td>代码 Apache-2.0；模型 NVIDIA Open Model License</td><td class="num" data-sort="5720">★1.4k<br>HF 5,720/月（总 81.2万）</td><td class="num" data-sort="">PAI-Bench 0.768</td><td class="apiv">原厂：<span class="r">仅自托管 NIM 容器</span>（<code>nvcr.io/nim/nvidia/cosmos-predict2.5-2b</code>）<br><span class="m">build.nvidia.com 对应托管页 404；Cosmos-Predict1-7b NIM 端点已 deprecated</span></td></tr>
+<tr><td>美团</td><td>LongCat-Video</td><td class="num">13.6B</td><td class="num">未取证（README 仅提 --use_int8 量化）</td><td>MIT（权重）</td><td class="num" data-sort="2089">★9.2k<br>HF 2,089/月</td><td class="num" data-sort="">未取证<br>（原文仅定性「仅次于 Veo3」）</td><td class="apiv"><span class="y">未取证</span>（美团未见公开 API）</td></tr>
+<tr><td>阶跃星辰</td><td>Step-Video-TI2V</td><td class="num">30B</td><td class="num"><span class="tag">官方</span> README 假设「more than 4 GPUs available」——非家用口径</td><td>MIT</td><td class="num" data-sort="36">★374<br>HF 36/月</td><td class="num" data-sort="">未取证<br>（用自有 Step-Video-T2V-Eval）</td><td class="apiv"><span class="y">未取证</span>（阶跃平台有视频生成，是否此权重未取证）</td></tr>
+<tr><td>社区 lllyasviel</td><td><span class="hl">FramePack F1 / P1</span></td><td class="num">13B</td><td class="num"><span class="tag">官方</span> 最低 <span class="hl">6GB</span>（生成 1 分钟 30fps 1800 帧）；4090 约 2.5 秒/帧（未优化）或 1.5 秒/帧（teacache）</td><td>Apache-2.0</td><td class="num" data-sort="147011">★17.3k<br>HF 14.7万/月（总 180万）</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：<span class="y">无 API</span>（作者明示无任何网络服务）<br>第三方：Replicate <code>zsxkib/framepack</code> ≈$0.53/run；fal <code>framepack</code> $0.0333/秒</td></tr>
+<tr><td>社区 deepbeepmeep</td><td>Wan2GP / WanGP（多模型低显存封装）</td><td class="num">—</td><td class="num"><span class="tag">官方</span> 可选模型低至 <span class="hl">6GB</span></td><td>WanGP Community License 2.0</td><td class="num" data-sort="">★10.5k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（本地低显存封装，自托管）</td></tr>
+<tr><td>Comfy-Org</td><td>ComfyUI（承载上述模型的宿主）</td><td class="num">—</td><td class="num"><span class="tag">官方</span> <span class="hl">4GB VRAM + 8GB RAM</span>（异步权重流式加载）</td><td>未取证</td><td class="num" data-sort="">★137.4k<br>Wan2.2 重打包 694万/月</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（本地/自托管前端；Comfy Deploy 等第三方托管未取证）</td></tr>
+<tr><td>Stability</td><td>SVD（Stable Video Diffusion）</td><td class="num">未取证</td><td class="num">未取证（README 仅给低显存参数 --encoding_t=1 --decoding_t=1）</td><td>未取证</td><td class="num" data-sort="102631">HF 10.3万/月（总 828万）</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：<span class="r">已停止支持</span><br><span class="m">Stability 2025-07-24 release notes：SVD API 与 SD1.6 API 停止支持，仅留自托管 license</span><br>第三方：Replicate ≈$0.050/run；fal <code>stable-video</code> $0.075/video</td></tr>
+<tr><td>字节</td><td>Bernini / BindWeave 等</td><td class="num">未取证</td><td class="num">未取证</td><td>Apache-2.0（Bernini）</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+</table>
+<div class="note"><b>能力列的口径冲突（重要）：</b>同一模型在不同榜差异极大。<b>HunyuanVideo</b> 在 VBench 标准版总分第 1（83.24），但在 VBench-2.0 的「复杂剧情」维度仅 10.11%、「动态属性」22.71%——<span class="hl">两榜不可互相换算</span>。另需注意 VBench-2.0 只评了 4 个模型（HunyuanVideo、CogVideoX-1.5、Sora、Kling 1.6），本清单多数模型未收录。<br>
+<b>榜单覆盖缺口：</b>AA 视频榜（T2V/I2V）前列全是闭源（Wan 3.0 居 T2V 第 1，属阿里闭源版），且可见行仅到第 18–19 名，<span class="hl">Wan2.2 / CogVideoX / Mochi / LTX-Video 等开源模型未出现在已抓取区间</span>，故其 Elo 标「未取证」而非推断。</div>
+
+<h2 id="s7">七、家用机可跑模型全集 · OCR / 文档解析</h2>
+<p class="sub">Mac / CPU 可运行性为独立列，因该维度对家用机选型影响最大。<b>能力</b>列取 <b>OmniDocBench</b>（OpenDataLab 出品，CVPR 2025 收录，文档解析领域公认最权威基准，中文友好）Overall 分——<span class="hl">这是第三方统一评测，非模型自测</span>；标「v1.5」者为旧版基准（v1.6 版分数普遍更高，同一模型两版分差约 1–2 分）；标「olmOCR-Bench」者为 Ai2 官方另一套 pass/fail 基准。</p>
+<table data-sorthint="热度按 HuggingFace 近 30 天下载量排；无 HF 权重仓的纯 GitHub 项目排末位（其 stars 见单元格）。能力按 OmniDocBench Overall 排，仅在 olmOCR-Bench 有分的排末位——两套基准不可混算。">
+<tr><th>模型</th><th>出品方</th><th>参数 / 权重大小</th><th>显存与平台（含 Mac / CPU）</th><th>许可</th><th>热度</th><th>能力</th><th>API 售卖方</th></tr>
+<tr><td>PP-OCRv6 tiny / small / medium</td><td>百度</td><td class="num">1.5M / 7.7M / 34.5M</td><td class="num">Apple M4 上 6.1×、CPU 5.2×；ONNX / OpenVINO / PaddleOCR.js；50 语言单模型</td><td>Apache-2.0</td><td class="num" data-sort="2349">★91.1k（PaddleOCR）<br>HF medium_det 2,349/月</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：<span class="g">百度 AI Studio <code>PaddleOCRClient</code></span>（限时免费，3000 页/日/模型）+ 百度智能云「PaddleOCR 企业版」</td></tr>
+<tr><td>PP-OCRv5 多语种</td><td>百度</td><td class="num">2M（识别）</td><td class="num">109 语言；CPU / GPU / XPU / NPU；macOS 徽章支持</td><td>Apache-2.0</td><td class="num" data-sort="483351">★91.1k<br>HF server_det 48.3万/月<br>（总 720万）</td><td class="num" data-sort="">文本识别分项<br>ALL_avg 0.067</td><td class="apiv">原厂：同上（AI Studio 官方 API <code>Model.PP_OCRV5</code>）</td></tr>
+<tr><td>PP-StructureV3</td><td>百度</td><td class="num">未取证</td><td class="num">输出含单元格坐标的 MD / JSON</td><td>Apache-2.0</td><td class="num" data-sort="">★91.1k（同仓）</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：AI Studio 官方 API <code>Model.PP_STRUCTUREV3</code></td></tr>
+<tr><td><span class="hl">PaddleOCR-VL-0.9B</span></td><td>百度</td><td class="num">958,588,736（权重约 1.79GiB BF16）</td><td class="num"><span class="ok">Apple Silicon 支持（PaddlePaddle / MLX-VLM）、AMD GPU 支持、Intel Arc 支持、昇腾 / 昆仑芯 / 海光 / 沐曦 / 天数 支持</span>；仅 vLLM、SGLang、FastDeploy 在 Apple Silicon 为不支持。109–111 语言</td><td>Apache-2.0</td><td class="num" data-sort="8318">HF 8,318/月（总 20万）<br>MS 48.9万<br>v1.5 版 HF 1.9万/月</td><td class="num hl" data-sort="94.18">ODB 94.18<br>1.6 版 96.34<br>olmOCR 80.0</td><td class="apiv">原厂：<span class="g">百度智能云「文档解析（PaddleOCR-VL）」</span> 0.05 元/页（原 0.09；活动低至 9 元/千页）+ AI Studio<br>第三方：硅基流动（免费档，1000 RPM）</td></tr>
+<tr><td>Tesseract 5</td><td>HP 开源 / Google 维护</td><td class="num">未取证</td><td class="num">纯 CPU，无 GPU 路径；100+ 语言；无 GUI；输出 txt / hOCR / PDF / TSV / ALTO</td><td>Apache-2.0（依赖 Leptonica BSD-2）</td><td class="num" data-sort="">★77.0k</td><td class="num" data-sort="">文本识别 0.324</td><td class="apiv"><span class="y">原厂不卖</span><br>第三方聚合：Open-OCR.com $0.002/页</td></tr>
+<tr><td>EasyOCR</td><td>JaidedAI</td><td class="num">权重自动下载</td><td class="num">纯 CPU（gpu=False）；80+ 语言；MPS 未取证</td><td>Apache-2.0</td><td class="num" data-sort="">★30.1k</td><td class="num" data-sort="">文本识别 0.329</td><td class="apiv"><span class="y">原厂不卖</span><br>第三方：Open-OCR.com $0.002/页、RapidAPI</td></tr>
+<tr><td>RapidOCR</td><td>RapidAI</td><td class="num">PaddleOCR 转 ONNX</td><td class="num">onnxruntime CPU；ONNX / TensorRT / OpenVINO / MNN；默认中英</td><td>Apache-2.0</td><td class="num" data-sort="">★8.1k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">原厂不卖</span><br>第三方：Open-OCR.com $0.002/页</td></tr>
+<tr><td>CnOCR</td><td>breezedeus</td><td class="num">模型 1.7MB–108MB（20+ 个预训练模型）</td><td class="num">ort-cpu 纯 CPU / ort-gpu；已集成 PP-OCRv6 多语种；支持竖排</td><td>未取证（LICENSE 正文未取到）</td><td class="num" data-sort="">★3.8k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>docTR</td><td>t2k GmbH（原 Mindee）</td><td class="num">未取证</td><td class="num">PyTorch，Python 3.11+；含版式检测与表格结构识别；GPU 走 CUDA 12.2 容器</td><td>Apache-2.0</td><td class="num" data-sort="">★6.4k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">原厂不卖</span><br>第三方：Open-OCR.com $0.002/页</td></tr>
+<tr><td>Umi-OCR</td><td>hiroi-sora</td><td class="num">自带 PaddleOCR-json / RapidOCR-json 引擎</td><td class="num"><span class="hl">仅 Windows 7 x64 与 Linux x64；macOS 在远期计划中，尚未支持</span>；支持 CLI 与 HTTP 接口；截图 / 批量 / PDF / 二维码 / 公式</td><td>开源免费</td><td class="num" data-sort="">★47.9k</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">无 API</span>（桌面软件，自带 HTTP 接口仅供本地调用）</td></tr>
+<tr><td>Nougat</td><td>Meta</td><td class="num">0.1.0-small / -base</td><td class="num">CPU 可跑（--full-precision）；<span class="hl">仅英文及拉丁语系，中文 / 俄文 / 日文明确不支持</span>；学术 PDF 专用</td><td>代码 MIT / 权重 CC-BY-NC</td><td class="num" data-sort="36945">★10.1k<br>HF 3.7万/月（总 317万）</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">原厂不卖</span>（Meta 研究项目）</td></tr>
+<tr><td>GOT-OCR2.0</td><td>UCAS + 阶跃</td><td class="num">580M（权重 1,432,121,416 B 约 1.33GiB）</td><td class="num">官方 CUDA 11.8；社区有 GGUF / llama.cpp、ONNX、MNN、CPU 版（非官方）；科学文档 / 公式 / 乐谱强</td><td><span class="hl">代码 Apache-2.0 / 训练数据 CC BY-NC 4.0</span></td><td class="num" data-sort="468748">★8.2k<br>HF 46.9万/月（总 622万）</td><td class="num" data-sort="">olmOCR 48.3</td><td class="apiv">第三方：Replicate <code>jichengdu/got-ocr-2</code> 约 $0.00098/次<br><span class="m">阶跃原厂托管未取证</span></td></tr>
+<tr><td>dots.ocr</td><td>小红书</td><td class="num">1.7B</td><td class="num">vLLM ≥0.11.0 官方集成 / transformers；README 含 CPU 推理小节；100+ 语言</td><td>MIT</td><td class="num" data-sort="888620">★9.2k<br>HF 88.9万/月（总 731万）</td><td class="num" data-sort="90.77">ODB 90.77<br>v1.5 版 88.41</td><td class="apiv">第三方：Replicate <code>sljeff/dots.ocr</code>、FriendliAI <code>dots.ocr-1.5</code>、Puter.js<br><span class="m">小红书原厂未见 API</span></td></tr>
+<tr><td>dots.mocr（dots.ocr-1.5）</td><td>小红书</td><td class="num">3B</td><td class="num">vLLM ≥0.11.0</td><td>MIT</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">olmOCR 83.9</td><td class="apiv">第三方：FriendliAI（<code>dots.ocr-1.5</code>）</td></tr>
+<tr><td>Granite-Docling-258M</td><td>IBM</td><td class="num">258M（权重 515,093,104 B 约 515MB bf16）</td><td class="num">未取证（ollama 无此页，实测 404）</td><td>未取证</td><td class="num" data-sort="290696">HF 29.1万/月（总 305万）</td><td class="num" data-sort="">未取证<br>（仅营销性宣称，无榜单出处）</td><td class="apiv">原厂：<span class="g">IBM <code>Docling for watsonx</code></span> 托管 REST + SDK，$4/千页<br>第三方：Open-OCR.com $0.004/页</td></tr>
+<tr><td>MonkeyOCRv2 / MonkeyOCR-pro</td><td>华中科技大学 VLR</td><td class="num">0.7B / 1.2B / 3B</td><td class="num"><span class="tag">官方</span> RTX 4060 8GB 可跑量化 3B 与 1.2B；AWQ / LMDeploy / vLLM</td><td>Apache-2.0（v2）</td><td class="num" data-sort="244">★6.7k<br>HF 244/月</td><td class="num" data-sort="88.57">ODB 88.57<br>（pro-3B）</td><td class="apiv"><span class="y">原厂不卖</span>（仓库仅提供自托管 FastAPI）</td></tr>
+<tr><td>DeepSeek-OCR</td><td>DeepSeek</td><td class="num">3B（约 6.7GB）</td><td class="num">官方仅 CUDA 11.8 环境；A100-40G 并发约 2500 tokens/s；高压缩比</td><td>未取证</td><td class="num" data-sort="2043817">★24.0k<br>HF 204.4万/月<br>（总 3689万）</td><td class="num" data-sort="">olmOCR 75.7<br>（v2 版 ODB 90.25）</td><td class="apiv">原厂：<span class="y">否</span>（DeepSeek 官方 API 只列 chat 类）<br>第三方：硅基流动（限时免费）、Replicate $0.064/次</td></tr>
+<tr><td>OCRFlux</td><td>ChatDOC</td><td class="num">3B（约 8.15GB）</td><td class="num">未取证；跨页合并、金融学术场景</td><td>Apache-2.0</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未取证</span></td></tr>
+<tr><td>Surya</td><td>Datalab</td><td class="num">650M</td><td class="num"><span class="ok">GPU / CPU / MPS 均可</span>（llama.cpp）；5 pages/s（RTX 5090）；内部 91 语言</td><td><span class="hl">代码 Apache-2.0 / 权重为改版 OpenRAIL-M（营收低于 500 万美元免费，超出需付费）</span></td><td class="num" data-sort="">★21.5k</td><td class="num" data-sort="">olmOCR 83.3<br>（OCR 2，0.65B）</td><td class="apiv">原厂：<span class="g">Datalab hosted API</span>（与 Marker 同一 API）$4–$10/千页</td></tr>
+<tr><td>Marker</td><td>Datalab</td><td class="num">surya 管线</td><td class="num"><span class="ok">GPU / CPU / MPS</span>；CPU 与 MPS 默认 --mode fast</td><td>同 Surya（权重低于 500 万美元营收免费）</td><td class="num" data-sort="">★40.4k</td><td class="num" data-sort="78.44">ODB 78.44<br>olmOCR 76.0</td><td class="apiv">原厂：<span class="g">Datalab hosted API</span> $4/千页（fast/balanced）、$10/千页（accurate）；免费额度 $20/月</td></tr>
+<tr><td>Chandra OCR 2</td><td>Datalab</td><td class="num">未取证</td><td class="num">仅 CUDA / H100 基准（96 并发 1.44 pages/s，均值 60 秒/页）；90+ 语言</td><td>代码 Apache-2.0 / 权重改版 OpenRAIL-M（低于 200 万美元营收免费）</td><td class="num" data-sort="1654286">★12.5k<br>HF 165.4万/月<br>（总 1293万）</td><td class="num" data-sort="">olmOCR 85.8<br>（自测口径）</td><td class="apiv">原厂：<span class="g">Datalab hosted API</span>（旗舰）$4–$10/千页<br><span class="m">权重商用免费门槛 $2M 营收（Marker/Surya 为 $5M）</span></td></tr>
+<tr><td>olmOCR-2</td><td>Ai2</td><td class="num">7B（FP8）</td><td class="num"><span class="hl">官方要求 NVIDIA GPU ≥12GB 显存 + 30GB 磁盘；无 CPU / Mac 路径</span></td><td>Apache-2.0</td><td class="num" data-sort="646">★19.7k<br>HF 646/月</td><td class="num" data-sort="85.74">ODB 85.74<br>olmOCR-Bench 82.4</td><td class="apiv"><span class="y">原厂不卖</span>（Ai2 仅 Playground 试用 + 自托管，无商用定价）</td></tr>
+<tr><td>MinerU 4.0 / 2.5</td><td>OpenDataLab</td><td class="num">1.2B（第三方口径）</td><td class="num"><span class="ok">macOS 默认可跑</span>（小模型 ONNX CPU + VLM 走 llama.cpp Vulkan）；PDF / Office / 图片 / URL → MD / JSON / LaTeX</td><td>未取证</td><td class="num" data-sort="10806">★81.7k<br>HF 1.1万/月（总 536万）</td><td class="num" data-sort="95.75">ODB 90.67（v1.5）<br>Pro 95.75（v1.6）<br>olmOCR 75.2</td><td class="apiv">原厂：<span class="g">MinerU 开放平台</span>（Precision Extract API 需 Token + Agent 轻量解析免登录）<br><span class="m">无公开付费价目表；免费 1000 页/日</span></td></tr>
+<tr><td>Moondream 2</td><td>vikhyatk</td><td class="num">1.8B（Ollama 1.7GB）</td><td class="num">Ollama 可跑，面向边缘设备</td><td>未取证</td><td class="num" data-sort="2345345">★10.1k<br>HF 234.5万/月<br>（总 3972万）</td><td class="num" data-sort="">未取证</td><td class="apiv">原厂：<span class="g">M87 Labs <code>Moondream Cloud</code></span>（OpenAI 兼容）$0.06/千张；$5/月免费额度</td></tr>
+<tr><td>Qwen3-VL-8B-Instruct</td><td>阿里</td><td class="num">8B（4 分片约 17.53GB BF16）</td><td class="num">未取证；可兼作 OCR / 文档理解</td><td>未取证</td><td class="num" data-sort="">未取证</td><td class="num" data-sort="">ODB 89.78<br>（235B 版）</td><td class="apiv">原厂：阿里云百炼（qwen3-vl 系列）<br>第三方：硅基流动等</td></tr>
+<tr><td>SmolDocling-256M</td><td>IBM / DS4SD</td><td class="num">256M（第三方口径）</td><td class="num">未取证</td><td>未取证</td><td class="num" data-sort="26365">HF 2.6万/月（总 202万）</td><td class="num" data-sort="">未取证</td><td class="apiv"><span class="y">未见独立商业 API</span>（仅经 Docling 管线调用）</td></tr>
+<tr><td>GLM-OCR / HunyuanOCR / Nanonets-OCR2-3B / OCRVerse-4B / Infinity-Parser-7B</td><td>智谱 / 腾讯 / Nanonets / DocTron 等</td><td class="num">0.9B–7B</td><td class="num">未取证（部分仅见于第三方基准表的模型名）</td><td>未取证</td><td class="num" data-sort="1700086">GLM-OCR HF 170万/月<br>HunyuanOCR HF 92.4万/月</td><td class="num" data-sort="95.22">GLM-OCR 95.22<br>HunyuanOCR 89.95（1B）<br>Nanonets 83.61</td><td class="apiv">GLM-OCR：原厂智谱 bigmodel 0.2 元/百万 token<br>HunyuanOCR：<span class="y">腾讯云未见上架</span>（Qubrid 宣称有，价格未取证）<br>Nanonets/OCRVerse/Infinity-Parser：<span class="y">未取证</span></td></tr>
+</table>
+<div class="note"><b>OmniDocBench v1.6 官方总榜前列（第三方统一评测）：</b>TeleOCR 96.91（1.2B）&gt; OvisOCR2 96.47（0.8B）&gt; <b>PaddleOCR-VL-1.6 96.34（0.9B）</b> &gt; MinerU2.5-Pro 95.75（1.2B）&gt; GLM-OCR 95.22（0.9B）。<br>
+<span class="hl">「小模型打赢大模型」是本榜最显著的结论</span>：0.9B 的 PaddleOCR-VL-1.6（96.34）高于 235B 的 Qwen3-VL（89.78）；1B 的 HunyuanOCR（89.95）同样高于 235B 的 Qwen3-VL。0.65B 的 Surya OCR 2 在 olmOCR-Bench 上 83.3，接近 4B 的 Chandra 2（85.8）。<br>
+<b>两套基准口径不可混用：</b>OmniDocBench 是文档解析综合分（文本编辑距离 + 表格 TEDS + 公式 CDM 三者平均），olmOCR-Bench 是 7,010 条 pass/fail 通过率，同一个模型在两榜名次可能不同（如 Marker 在 ODB 78.44、olmOCR 76.0）。</div>
+
+<h2 id="s8">八、按显存选型速查</h2>
+<div class="note">
+<b>8GB 卡</b>：图走 SANA 0.6B / 1.6B（官方 4-bit 低于 8GB）、FLUX.2 klein 4B（官方约 8GB）、SD1.5 / SDXL、FLUX.1 + nunchaku 4-bit（4GiB）；视频走 CogVideoX-2B（官方 4GB）、FramePack（官方 6GB）、Wan2GP（官方 6GB）、LTX-Video 0.9.x 2B（社区 8GB）；OCR 全部可跑。<br>
+<b>12GB 卡</b>：图加 Qwen-Image-2.1 GGUF Q8_0 + W4A8、SD3.5、FLUX.2 klein 9B FP8（约 15GB，偏紧）；视频加 Wan2.1-T2V-1.3B（官方 8.19GB）、CogVideoX-5B（官方 5GB）、SkyReels-V2-1.3B（官方 14.7GB，偏紧）。<br>
+<b>16GB 卡</b>：图走 Qwen-Image-2.1 INT8（峰值 13.9–15GB）、FLUX.2 klein 9B FP8；视频走 HunyuanVideo-1.5（官方 14GB，注意地区许可限制）、CogVideoX1.5-5B（官方 10GB）。<br>
+<b>24GB 卡（4090 档）</b>：视频进入 Wan2.2-TI2V-5B（官方 ≥24GB）与 Mochi 1（ComfyUI 优化后低于 20GB）；图可跑 FLUX.2 [dev] GGUF Q4（约 19GB）或官方给的 4090 + remote text encoder 跑法。注意：<b>Qwen-Image-2.1 加两张参考图做编辑会到 25.6GB，24GB 会溢出</b>。<br>
+<b>32GB 以上 / 数据中心级</b>：才轮到 LTX-2（ComfyUI 前置要求 32GB+）、Wan2.2-A14B 与 HunyuanVideo 1.0（≥80GB）、HunyuanImage-3.0（≥3×80GB）。<br><br>
+<b>Mac（Apple Silicon）用户</b>：OCR 侧体验最好——PaddleOCR-VL 有官方 Apple Silicon 教程，Marker / Surya 官方支持 MPS，MinerU 的 macOS 默认包即最佳吞吐，PP-OCRv6 在 M4 上 6.1×。视频侧 LTX-Video 官方支持 macOS MPS（PyTorch 2.3.0）。图像侧 Qwen-Image-2.1 官方无 MPS 路径，只能走社区 mflux（MLX）：M5 Max 上 bf16 峰值约 46GB、-q 8 约 30.7GB，<span class="hl">32GB 机型须用 -q 4，64GB 才稳</span>。Umi-OCR 不支持 macOS。
+</div>
+
+<h2 id="s9">九、成本换算示例</h2>
+<div class="note">
+<b>1000 张 2K 图</b>：阿里 wan2.6-t2i 0.20 元/张 ≈ <span class="num">200 元</span>；火山 seedream-5-0-pro（大于 1.5K 档）0.60 元/张 ≈ <span class="num">600 元</span>；腾讯混元生图 3.0 0.2 元/张 ≈ 200 元；MiniMax 0.025 元/张 ≈ <span class="num">25 元</span>。<br>
+<b>100 条 5 秒 720P 视频</b>：阿里万相 0.6 元/秒 ≈ <span class="num">300 元</span>；Veo 3.1 Fast $0.10/秒 ≈ <span class="num">$50</span>；Veo 3.1 Standard $0.40/秒 ≈ <span class="num">$200</span>；可灵 3.0 720P $0.084/秒 ≈ <span class="num">$42</span>。<br>
+<b>10 万页 OCR</b>：阿里 0.0415–0.0495 元/次 ≈ <span class="num">4150–4950 元</span>；AWS Textract 与 Azure Read 均约 <span class="num">$150</span>；腾讯资源包 10 万次 = 5000 元；智谱 OCR 解析工具 0.01 元/页 = <span class="num">1000 元</span>。<br>
+<b>2000 条 5 秒 1080p 视频（含草稿策略）</b>：先 2000 条 480p 草稿再用 1080p 出 200 条成片，Seedance 2.0 牌价估算 2000×5×$0.04 + 200×5×$0.34 = <span class="num">$740</span>；若全部直出 1080p 则为 2000×5×$0.34 = <span class="num">$3400</span>。
+</div>
+
+<h2 id="s11">十、API 调用方式 · 图像 / 视频生成（国内）</h2>
+<p class="sub">本章解决「照着能发出第一个请求」。端点 path、header 名、参数名均逐字取自官方文档；抓不到的写「未取证」。鉴权形态只有三类：<span class="hl">Bearer</span>（多数）、<span class="hl">自实现签名</span>（腾讯 TC3、阿里 ACS3）、<span class="hl">先换 token</span>（百度）。</p>
+
+<div class="api">
+<h3>阿里云百炼 DashScope（通义万相）</h3>
+<table>
+<tr><td>地域 / 域名</td><td>北京 <code>https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com</code>；新加坡 <code>ap-southeast-1</code>；美东 <code>us-east-1</code>。旧域名 <code>dashscope.aliyuncs.com</code> 仍可用但官方建议迁移。<b>模型、Endpoint URL、API Key 三者必须同地域，跨地域调用失败</b></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $DASHSCOPE_API_KEY</code> + <code>Content-Type: application/json</code>，无额外签名</td></tr>
+<tr><td>文生图（wan2.6）</td><td><code>POST /api/v1/services/aigc/multimodal-generation/generation</code>（新版协议，同步）</td></tr>
+<tr><td>文生图（wan2.5 及以下）</td><td><code>POST /api/v1/services/aigc/text2image/image-synthesis</code> + <code>X-DashScope-Async: enable</code></td></tr>
+<tr><td>文生图（wan2.6 / 2.7-image）</td><td><code>POST /api/v1/services/aigc/image-generation/generation</code> + <code>X-DashScope-Async: enable</code></td></tr>
+<tr><td>文生视频（wan2.5 / 2.6）</td><td><code>POST /api/v1/services/aigc/video-generation/video-synthesis</code> + <code>X-DashScope-Async: enable</code>（wan2.7-t2v 的 HTTP path 未取证）</td></tr>
+<tr><td>异步查询</td><td><code>GET /api/v1/tasks/{task_id}</code> + Bearer。<b>task_id 有效期 24 小时</b>，过期返回 <code>task_status: UNKNOWN</code></td></tr>
+<tr><td>状态取值</td><td><code>PENDING</code> → <code>RUNNING</code> → <code>SUCCEEDED</code> / <code>FAILED</code>；另有 <code>CANCELED</code>、<code>UNKNOWN</code></td></tr>
+<tr><td>轮询间隔</td><td>官方 qwen-image 示例<b>每 5 秒</b>；视频文档仅写「建议采用轮询机制」</td></tr>
+<tr><td>关键参数</td><td>wan2.6-t2i：<code>size</code> 默认 <code>1280*1280</code>（总像素 [1280×1280, 1440×1440]，比例 [1:4, 4:1]）；<code>n</code> 默认 4（1–4）；<code>prompt_extend</code> 默认 true；<code>watermark</code> 默认 false；<code>seed</code> [0, 2147483647]；prompt ≤2100 字符。视频：<code>size</code> <code>1280*720</code>/<code>832*480</code>、<code>duration</code> 10；wan2.7-t2v 改用 <code>resolution</code>(720P) + <code>ratio</code>(16:9) + <code>duration</code></td></tr>
+<tr><td>返回</td><td>图片 <code>output.results[].url</code>、视频 <code>output.video_url</code>，<b>均为带签名的 OSS URL（非 base64）</b>；视频链接有效期 24 小时</td></tr>
+<tr><td>SDK</td><td><code>dashscope</code>（Python <code>ImageGeneration</code> / <code>VideoSynthesis</code>，Java <code>com.alibaba.dashscope</code>）</td></tr>
+</table>
+<pre><code>curl --location 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation' \
+--header 'Content-Type: application/json' \
+--header "Authorization: Bearer $DASHSCOPE_API_KEY" \
+--data '{"model":"wan2.6-t2i","input":{"messages":[{"role":"user","content":[{"text":"一只可爱的猫"}]}]},"parameters":{"prompt_extend":true,"watermark":false,"n":1,"size":"1280*1280"}}'</code></pre>
+</div>
+
+<div class="api">
+<h3>火山方舟 Volcengine Ark（Seedream 图像 / Seedance 视频）</h3>
+<table>
+<tr><td>地域 / 域名</td><td>北京 <code>https://ark.cn-beijing.volces.com/api/v3</code>；国际 BytePlus <code>ark.ap-southeast.bytepluses.com</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $ARK_API_KEY</code> + <code>Content-Type: application/json</code>，无签名</td></tr>
+<tr><td>文生图</td><td><code>POST /api/v3/images/generations</code>，<b>同步返回</b>（<code>stream:true</code> 可流式）</td></tr>
+<tr><td>文生视频</td><td><code>POST /api/v3/contents/generations/tasks</code>，<b>异步</b>，返回 <code>id</code></td></tr>
+<tr><td>异步查询</td><td><code>GET /api/v3/contents/generations/tasks/{id}</code>；另有 list / cancel 接口</td></tr>
+<tr><td>状态取值</td><td><code>queued</code> / <code>running</code> / <code>succeeded</code> / <code>failed</code> / <code>cancelled</code>；超时被终止为 <code>expired</code></td></tr>
+<tr><td>轮询间隔</td><td>官方示例 <b>10 秒</b></td></tr>
+<tr><td>视频参数</td><td><code>model</code>（如 <code>doubao-seedance-2-5-260628</code>）、<code>content[]</code>（<code>{"type":"text","text":...}</code>、<code>image_url</code> 带 <code>role: first_frame/last_frame/reference_image</code>、<code>video_url</code>、<code>audio_url</code>）、<code>ratio</code>（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / adaptive）、<code>resolution</code>（480p / 720p / 1080p / 4k）、<code>duration</code>（2.0 系列 4–15s，2.5 为 4–30s）、<code>generate_audio</code> 默认 true、<code>watermark</code>、<code>seed</code>、<code>fps</code>、<code>camera_fixed</code></td></tr>
+<tr><td>图片参数</td><td><code>model</code>（<code>doubao-seedream-5-0-pro-260628</code> 等）、<code>prompt</code>、<code>image</code>（参考图 URL）、<code>size</code> <b>默认 2K</b>、<code>response_format</code> <b>默认 url</b>（可 <code>b64_json</code>）、<code>output_format</code>、<code>watermark</code> <b>默认 true</b>、<code>sequential_image_generation</code>、<code>max_images</code></td></tr>
+<tr><td>返回</td><td>默认 URL；<b>链接 24 小时有效</b>；Seedance 2.5 视频 URL 下载次数上限 100 次</td></tr>
+<tr><td>超时</td><td><code>execution_expires_after</code> 默认 172800s（48 小时）</td></tr>
+<tr><td>SDK</td><td><code>arkruntime</code>（Python / Go / Java）</td></tr>
+</table>
+<pre><code>curl https://ark.cn-beijing.volces.com/api/v3/images/generations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ARK_API_KEY" \
+  -d '{"model":"doubao-seedream-4-0-250828","prompt":"星际穿越，黑洞","size":"2K","response_format":"url","watermark":true}'
+
+curl https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ARK_API_KEY" \
+  -d '{"model":"doubao-seedance-2-5-260628","content":[{"type":"text","text":"写实风格，雏菊花田"}],"ratio":"16:9","duration":5,"watermark":true}'</code></pre>
+</div>
+
+<div class="api">
+<h3>腾讯云混元生图</h3>
+<table>
+<tr><td>端点</td><td><code>POST https://hunyuan.tencentcloudapi.com/</code>（统一入口，Action 走 header）</td></tr>
+<tr><td>地域</td><td><code>Region</code> <b>仅支持 <code>ap-guangzhou</code></b></td></tr>
+<tr><td>鉴权</td><td><b>TC3-HMAC-SHA256 签名</b>，无 Bearer 形态。Header 需 <code>Authorization</code>、<code>X-TC-Action</code>、<code>X-TC-Version: 2023-09-01</code>、<code>X-TC-Region</code>、<code>X-TC-Timestamp</code>、<code>Content-Type: application/json</code></td></tr>
+<tr><td>提交任务</td><td><code>X-TC-Action: SubmitHunyuanImageJob</code>，Body <code>{"Prompt":"雨中, 竹林, 小路"}</code> → <code>Response.JobId</code></td></tr>
+<tr><td>查询任务</td><td><code>X-TC-Action: QueryHunyuanImageJob</code>，Body <code>{"JobId":"..."}</code></td></tr>
+<tr><td>状态字段</td><td><code>JobStatusCode</code>：<code>1</code> 等待中 / <code>2</code> 运行中 / <code>4</code> 处理失败 / <code>5</code> 处理完成</td></tr>
+<tr><td>关键参数</td><td>提交核心为 <code>Prompt</code>；扩写受 <code>Revise</code> 控制（查询返回 <code>RevisedPrompt</code>）；结果 <code>ResultImage</code> 为 URL 数组</td></tr>
+<tr><td>返回</td><td>URL 数组，<b>有效期仅 1 小时</b>（COS 签名 URL），须及时保存</td></tr>
+<tr><td>限流</td><td>默认频率 <b>20 次/秒</b>；<b>并发任务数默认 1</b>（上一个处理完才能下一个）</td></tr>
+<tr><td>SDK</td><td><code>tencentcloud-sdk-python/java/nodejs</code>（<code>hunyuan/v20230901</code>）。<b>REST 也必须自行实现 TC3 签名</b></td></tr>
+</table>
+<pre><code>POST / HTTP/1.1
+Host: hunyuan.tencentcloudapi.com
+Content-Type: application/json
+X-TC-Action: SubmitHunyuanImageJob
+X-TC-Version: 2023-09-01
+X-TC-Region: ap-guangzhou
+X-TC-Timestamp: 1551113065
+Authorization: TC3-HMAC-SHA256 Credential=.../ap-guangzhou/hunyuan/tc3_request, ...
+
+{"Prompt": "雨中, 竹林, 小路"}</code></pre>
+</div>
+
+<div class="api">
+<h3>智谱 BigModel（GLM-Image / CogVideoX）</h3>
+<table>
+<tr><td>域名</td><td><code>https://open.bigmodel.cn</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer &lt;API Key&gt;</code> + <code>Content-Type: application/json</code>，无额外签名</td></tr>
+<tr><td>图像（同步）</td><td><code>POST /api/paas/v4/images/generations</code>，<code>model: glm-image</code>，<b>同步直接返回 URL</b></td></tr>
+<tr><td>图像（异步）</td><td><code>POST /api/paas/v4/async/images/generations</code> → 返回 <code>{model, id, request_id, task_status}</code></td></tr>
+<tr><td>视频（异步）</td><td><code>POST /api/paas/v4/videos/generations</code>，<code>model: cogvideox-3</code></td></tr>
+<tr><td>异步查询</td><td><code>GET /api/paas/v4/async-result/{id}</code>（图片与视频共用）</td></tr>
+<tr><td>关键参数</td><td>图像：<code>prompt</code>、<code>size</code>（示例 <code>1280x1280</code>）、<code>quality</code>（<code>glm-image</code> 仅支持 <code>hd</code>，约 20s；其它默认 <code>standard</code>，约 5–10s）。视频：<code>prompt</code>、<code>quality</code>、<code>with_audio</code>、<code>size</code>、<code>fps</code></td></tr>
+<tr><td>SDK</td><td><code>zai-sdk</code>（Java <code>ai.z.openapi:zai-sdk</code>）</td></tr>
+</table>
+<pre><code>curl --request POST --url https://open.bigmodel.cn/api/paas/v4/images/generations \
+  --header 'Authorization: Bearer &lt;token&gt;' --header 'Content-Type: application/json' \
+  --data '{"model":"glm-image","prompt":"一只可爱的小猫咪","size":"1280x1280"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>MiniMax</h3>
+<table>
+<tr><td>域名</td><td>国际 <code>https://api.minimax.io</code>；国内 <code>https://api.minimaxi.com</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer &lt;API Key&gt;</code>，无签名</td></tr>
+<tr><td>文生图</td><td><code>POST /v1/image_generation</code>，<b>同步</b>（返回 <code>data.image_urls</code> 或 <code>data.image_base64</code>）</td></tr>
+<tr><td>文生视频（H3）</td><td><code>POST /v2/video_generation</code>，<b>异步</b>，顶层返回 <code>task_id</code></td></tr>
+<tr><td>视频查询</td><td><code>GET /v2/query/video_generation/{task_id}</code> → <code>task.status</code> / <code>task.content.url</code></td></tr>
+<tr><td>状态取值</td><td><code>processing</code> → <code>succeeded</code>；失败终态 <code>failed</code> / <code>cancelled</code></td></tr>
+<tr><td>轮询间隔</td><td>官方推荐 <b>10 秒</b></td></tr>
+<tr><td>image-01 参数</td><td><code>aspect_ratio</code>（或用 <code>width</code>+<code>height</code>，同时给以 aspect_ratio 优先）；<code>response_format</code>：<code>url</code> / <code>base64</code>；<code>n</code> 默认 1（1–9）；<code>prompt_optimizer</code>；<code>seed</code>；<code>subject_reference[]</code>；prompt ≤1500 字符</td></tr>
+<tr><td>H3 参数</td><td><code>model: MiniMax-H3</code>（另有 <code>MiniMax-H3-Max</code>）；<code>content[]</code> 按 <code>type</code> 区分 <code>text</code> / <code>image_url</code> / <code>video_url</code> / <code>audio_url</code>，可带 <code>role</code>；<code>duration</code>（H3 4–15s / H3-Max 5–15s）；<code>resolution</code>（H3 <code>768P</code>/<code>2K</code>）；<code>ratio</code>（t2v 必填）</td></tr>
+<tr><td>旧版视频</td><td><code>POST /v1/video_generation</code>（<code>MiniMax-Hailuo-2.3</code>）仍为 v1 形态</td></tr>
+</table>
+<pre><code>curl --request POST --url https://api.minimax.io/v2/video_generation \
+  --header 'Authorization: Bearer &lt;token&gt;' --header 'Content-Type: application/json' \
+  --data '{"model":"MiniMax-H3","content":[{"type":"text","text":"A tiktok dancer is dancing on a drone"}],"duration":5,"resolution":"2K","ratio":"16:9"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>快手可灵 Kling</h3>
+<table>
+<tr><td>域名</td><td><code>https://api-beijing.klingai.com</code>（<b>新系统域名，已由 <code>api.klingai.com</code> 变更</b>，适用于中国区）</td></tr>
+<tr><td>鉴权（新版）</td><td>模型版本在 path 中：<code>Authorization: Bearer &lt;API_KEY&gt;</code>，全模型适用</td></tr>
+<tr><td>鉴权（旧版）</td><td>模型版本作为 <code>model_name</code> 传参：需 AK/SK 现算 <b>JWT</b>（<code>alg: HS256</code>，payload <code>iss</code>=AK、<code>exp</code>=当前+1800s、<code>nbf</code>=当前−5s，用 SK 签名），再拼 <code>Bearer &lt;JWT&gt;</code></td></tr>
+<tr><td>文生视频</td><td><code>POST /text-to-video/kling-3.0</code>（异步，返回 <code>data.id</code>）</td></tr>
+<tr><td>视频查询</td><td><code>GET /tasks?task_ids=&lt;id&gt;</code> 或 <code>?external_task_ids=</code></td></tr>
+<tr><td>视频状态</td><td><code>submitted</code> / <code>processing</code> / <code>succeeded</code> / <code>failed</code></td></tr>
+<tr><td>文生图</td><td><code>POST /v1/images/generations</code>，<code>model_name</code> 默认 <code>kling-v3</code></td></tr>
+<tr><td>图片状态</td><td><code>submitted</code> / <code>processing</code> / <b><code>succeed</code></b> / <code>failed</code> —— <span class="hl">注意与视频的 <code>succeeded</code> 拼写不同</span></td></tr>
+<tr><td>视频参数</td><td><code>prompt</code>（≤3072）；<code>settings.{multi_shot 默认 true, audio 默认 off, resolution 默认 720p, aspect_ratio 默认 16:9, duration 默认 5（3–15）}</code>；<code>options.{callback_url, external_task_id, watermark_info.enabled 默认 false}</code></td></tr>
+<tr><td>图片参数</td><td><code>prompt</code>（≤2500）、<code>negative_prompt</code>、<code>image</code>（URL 或纯 base64，<b>不带 <code>data:</code> 前缀</b>）、<code>image_fidelity</code> 默认 0.5、<code>resolution</code> 默认 1k、<code>n</code> 默认 1（1–9）、<code>aspect_ratio</code> 默认 16:9</td></tr>
+<tr><td>回调</td><td>支持：<code>options.callback_url</code>（视频）/ <code>callback_url</code>（图片）</td></tr>
+<tr><td>返回</td><td>防盗链格式 URL；<b>生成内容 30 天后被清理</b></td></tr>
+</table>
+<pre><code>curl --location 'https://api-beijing.klingai.com/text-to-video/kling-3.0' \
+--header 'Authorization: Bearer {apikey}' --header 'Content-Type: application/json' \
+--data '{"prompt":"A girl sat on the train, looking out the window","settings":{"resolution":"720p","aspect_ratio":"16:9","duration":5,"audio":"off","multi_shot":true},"options":{"watermark_info":{"enabled":false}}}'</code></pre>
+</div>
+
+<div class="api">
+<h3>百度千帆</h3>
+<table>
+<tr><td>域名</td><td><code>https://qianfan.baidubce.com</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer &lt;API Key&gt;</code>（形如 <code>bce-v3/ALTAK-****/****</code>），无额外签名</td></tr>
+<tr><td>通用图像生成</td><td><code>POST /v2/images/generations</code>，Body <code>{"model":"qwen-image","prompt":"画一只小狗"}</code>，<b>同步返回</b> <code>data[].url</code></td></tr>
+<tr><td>其它图像端点</td><td><code>POST /v2/musesteamer/images/generations</code>（<code>musesteamer-air-image</code>，支持 <code>size</code> / <code>seed</code> / <code>prompt_extend</code> / <code>response_format</code>）</td></tr>
+<tr><td>文生视频</td><td><code>POST /beta/video/generations/qianfan-video</code>（<b>异步</b>，返回 <code>task_id</code>）</td></tr>
+<tr><td>视频查询</td><td><code>GET /beta/video/generations/qianfan-video/fireseries?task_id=&lt;id&gt;</code>；<b>任务记录仅保留 7 天</b></td></tr>
+<tr><td>状态取值</td><td>创建返回 <code>created</code> / <code>queueing</code> / <code>processing</code> / <code>success</code> / <code>failed</code>；查询返回 <code>created</code> / <code>processing</code> / <code>success</code> / <code>failed</code></td></tr>
+<tr><td>视频参数</td><td><code>type</code> 固定 <code>text2video</code>；<code>model</code>：<code>VQ3-Pro</code> / <code>VQ3-Turbo</code> / <code>VQ2</code>；<code>model_parameters.{prompt ≤1500, duration（VQ3 默认 5，1–16）, seed, aspect_ratio 默认 16:9, resolution（VQ3 默认 720p）, bgm 默认 false, audio 默认 true}</code></td></tr>
+<tr><td>返回</td><td>图像 URL；视频 <code>result.content.video_url</code>，<b>有效期约 24 小时</b></td></tr>
+<tr><td>限流</td><td>并发超限返回 HTTP 429 <code>rate_limit_exceeded</code>；prompt 违规 403 <code>unsafe_request</code></td></tr>
+</table>
+<pre><code>curl --location 'https://qianfan.baidubce.com/v2/images/generations' \
+--header 'Content-Type: application/json' --header 'Authorization: Bearer bce-v3/ALTAK-****/****' \
+--data '{"model":"qwen-image","prompt":"画一只小狗"}'</code></pre>
+</div>
+
+<h2 id="s12">十一、API 调用方式 · 图像 / 视频生成（海外）</h2>
+<div class="note">海外这套与国内<b>最本质的差异</b>：图像多为<b>同步直返 base64 或二进制</b>（OpenAI、Gemini、Stability），视频才走异步；鉴权头五花八门（<code>x-goog-api-key</code>、<code>x-key</code>、<code>Authorization: Key</code>、<code>X-API-Key</code>），<span class="hl">不是统一的 Bearer</span>。</div>
+
+<div class="api">
+<h3>OpenAI Images API</h3>
+<table>
+<tr><td>端点</td><td><code>POST https://api.openai.com/v1/images/generations</code>；编辑 <code>POST /v1/images/edits</code>（multipart/form-data）</td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $OPENAI_API_KEY</code>，无 version header</td></tr>
+<tr><td>形态</td><td><b>同步返回</b>；支持 <code>"stream": true</code>（curl 加 <code>--no-buffer</code>）。<b>无异步 job id、无 webhook</b></td></tr>
+<tr><td>model 枚举</td><td><code>gpt-image-1</code>、<code>gpt-image-1-mini</code>、<code>gpt-image-1.5</code>、<code>gpt-image-2</code>、<code>gpt-image-2.5-sunburst</code>、<code>gpt-image-2.5-flare</code></td></tr>
+<tr><td>参数</td><td><code>prompt</code>、<code>n</code>、<code>size</code>（<code>auto</code> / <code>1024x1024</code> / <code>1536x1024</code> / <code>1024x1536</code>；2.x 支持任意 <code>WIDTHxHEIGHT</code>）、<code>quality</code>（默认 <code>auto</code>）、<code>output_format</code>、<code>background</code>；编辑侧 <code>image[]=@a.png</code>（≤16 张）、<code>input_fidelity</code></td></tr>
+<tr><td>返回</td><td><code>.data[0].b64_json</code>（<b>base64</b>）；对象另有 <code>url</code> 字段但官方样例按 b64 用。URL 有效期未取证</td></tr>
+</table>
+<pre><code>curl https://api.openai.com/v1/images/generations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{"model":"gpt-image-2.5-flare","prompt":"A cute baby sea otter","n":1,"size":"1024x1024"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Google Gemini API（图像 + Veo 3.1 视频）</h3>
+<table>
+<tr><td>端点</td><td>图像 <code>POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent</code>；新版 <code>POST .../v1beta/interactions</code></td></tr>
+<tr><td>鉴权</td><td><code>x-goog-api-key: $GEMINI_API_KEY</code>（旧式 <code>?key=</code>），版本在 path <code>v1beta</code></td></tr>
+<tr><td>图像形态</td><td>同步、<b>base64</b>，无 webhook</td></tr>
+<tr><td>图像参数</td><td><code>generationConfig.responseFormat.image.{aspectRatio,imageSize}</code>（<code>1K</code>/<code>4K</code>）；经典路径 <code>responseModalities:["IMAGE"]</code> + <code>imageConfig</code>；<code>tools:[{"googleSearch":{}}]</code> 接地；参考图最多 14 张</td></tr>
+<tr><td>图像返回</td><td><code>candidates[].content.parts[].inlineData{mimeType,data}</code></td></tr>
+<tr><td>视频端点</td><td>提交 <code>POST .../v1beta/models/veo-3.1-generate-preview:predictLongRunning</code>；轮询 <code>GET .../v1beta/{operation.name}</code></td></tr>
+<tr><td>视频形态</td><td><b>异步</b>，轮询看顶层 <code>done</code> 布尔；无官方 webhook 取证到</td></tr>
+<tr><td>视频参数</td><td><code>instances[].prompt</code>、<code>instances[].video.uri</code>、<code>parameters.{sampleCount, resolution(720p/1080p), aspectRatio, durationSeconds, seed}</code></td></tr>
+<tr><td>视频返回</td><td><code>...generatedSamples[0].video.uri</code> → <code>.../v1beta/files/xxx:download?alt=media</code>，<b>下载需带 key</b></td></tr>
+</table>
+<pre><code>curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning" \
+  -H "x-goog-api-key: $GEMINI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"instances":[{"prompt":"An origami butterfly flaps its wings."}],
+       "parameters":{"sampleCount":1,"resolution":"720p","aspectRatio":"16:9","durationSeconds":8}}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Stability AI（Stable Image）</h3>
+<table>
+<tr><td>端点</td><td><code>POST https://api.stability.ai/v2beta/stable-image/generate/{ultra|sd3|core}</code></td></tr>
+<tr><td>鉴权</td><td><code>authorization: Bearer sk-...</code> <b>且需 <code>accept: image/*</code></b>（或 <code>application/json</code> 拿 base64）</td></tr>
+<tr><td>形态</td><td>同步返回<b>图像二进制</b>；无 job id；Creative Upscale 等另有 async 版</td></tr>
+<tr><td>编码</td><td><b>multipart/form-data</b>，字段 snake_case（<code>files={"none": ''}</code>）</td></tr>
+<tr><td>ultra 参数</td><td><code>prompt</code>（必填 1..10000）、<code>negative_prompt</code>、<code>aspect_ratio</code>（默认 1:1）、<code>seed</code>（默认 0=随机）、<code>output_format</code>（<b>默认 png</b>）、<code>style_preset</code>、<code>image</code>+<code>strength</code>（有 image 时必填）</td></tr>
+<tr><td>sd3 参数</td><td><code>model</code> 默认 <code>sd3.5-large</code>、<code>mode</code> 默认 <code>text-to-image</code>、<code>cfg_scale</code> 1..10（Large/Medium 默认 4，Turbo/Flash 默认 1）</td></tr>
+<tr><td>返回</td><td>200 直接是图像字节；<b>无 URL、无 watermark 参数</b></td></tr>
+<tr><td>限流</td><td><b>150 requests / 10 seconds</b></td></tr>
+</table>
+<pre><code>requests.post("https://api.stability.ai/v2beta/stable-image/generate/ultra",
+  headers={"authorization": "Bearer sk-MYAPIKEY", "accept": "image/*"},
+  files={"none": ''},
+  data={"prompt": "Lighthouse on a cliff", "output_format": "webp"})</code></pre>
+</div>
+
+<div class="api">
+<h3>Black Forest Labs（FLUX / FLUX.2 / FLUX 3）</h3>
+<table>
+<tr><td>Base</td><td><code>https://api.bfl.ai</code>（区域 <code>api.eu.bfl.ai</code> / <code>api.us.bfl.ai</code>）；<b>必须用响应里的 <code>polling_url</code> 轮询，不要自己拼</b></td></tr>
+<tr><td>端点</td><td><code>POST /v1/flux-2-pro</code>、<code>/v1/flux-2-pro-preview</code>、<code>/v1/flux-3-video</code>；查结果 <code>GET /v1/get_result?id={task_id}</code></td></tr>
+<tr><td>鉴权</td><td><b>自定义头 <code>x-key: $BFL_API_KEY</code></b>（不是 Bearer）</td></tr>
+<tr><td>形态</td><td>异步（<code>id</code> + <code>polling_url</code>）；支持 <code>webhook_url</code> + <code>webhook_secret</code></td></tr>
+<tr><td>状态枚举</td><td><code>Pending</code>、<code>Reasoning</code>、<code>Generating</code>、<code>Request Moderated</code>、<code>Content Moderated</code>、<code>Ready</code>、<code>Error</code>、<code>Task not found</code></td></tr>
+<tr><td>FLUX.2 参数</td><td><code>prompt</code>（必填）、<code>input_image_1..8</code>、<code>seed</code>、<code>width</code>/<code>height</code>（默认 0，≥64）、<code>safety_tolerance</code>（默认 2，0 严 5 松）、<code>output_format</code>（默认 jpeg）、<code>webhook_url</code>、<code>webhook_secret</code></td></tr>
+<tr><td>FLUX 3 video</td><td><code>mode</code>（<code>t2v</code>/<code>i2v</code>）、<code>prompt</code>、<code>generate_audio</code>、<code>duration</code>、<code>aspect_ratio</code>、<code>keyframes</code></td></tr>
+<tr><td>返回</td><td><code>result.sample</code> 签名 URL，<b>仅 10 分钟有效</b>；图片走 <code>delivery.*.bfl.ai</code></td></tr>
+</table>
+<pre><code>request=$(curl -s -X POST 'https://api.bfl.ai/v1/flux-2-pro-preview' -H 'accept: application/json' \
+  -H "x-key: ${BFL_API_KEY}" -H 'Content-Type: application/json' \
+  -d '{"prompt":"A cat running like a human","width":1440,"height":2048}')
+polling_url=$(jq -r .polling_url &lt;&lt;&lt;"$request")
+curl -s "$polling_url" -H "x-key: $BFL_API_KEY"   # status=="Ready" 时读 .result.sample</code></pre>
+</div>
+
+<div class="api">
+<h3>Runway Developer API</h3>
+<table>
+<tr><td>Base</td><td><code>https://api.dev.runwayml.com</code></td></tr>
+<tr><td>端点</td><td><code>POST /v1/text_to_video</code>、<code>/v1/image_to_video</code>、<code>/v1/video_to_video</code>、<code>/v1/text_to_image</code>、<code>/v1/image_upscale</code>、<code>/v1/video_upscale</code>、<code>/v1/text_to_speech</code> 等 12 个；任务 <code>GET|DELETE /v1/tasks/{id}</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $RUNWAYML_API_SECRET</code> <b>且必须</b> <code>X-Runway-Version: 2024-11-06</code></td></tr>
+<tr><td>形态</td><td><b>全异步</b>：<code>{"id":"&lt;uuid&gt;"}</code> → 轮询 <code>GET /v1/tasks/{id}</code>；SDK 有 <code>waitForTaskOutput()</code></td></tr>
+<tr><td>状态</td><td><code>PENDING</code> / <code>THROTTLED</code> / <code>RUNNING</code> / <code>SUCCEEDED</code> / <code>FAILED</code> / <code>CANCELLED</code>；仅 <code>SUCCEEDED</code> 带 <code>output</code>；<code>THROTTLED</code> 是排队非错误</td></tr>
+<tr><td>参数</td><td>按 <code>model</code> 判别：<code>gen4.5</code> ratio <code>1280:720</code>/<code>720:1280</code>、duration 2–10、prompt ≤1000（两者必填）；<code>seedance2</code> 24 种 ratio 至 4K、duration 4–15。文生图 <code>model:"gen4_image"</code> + <code>ratio</code> + <code>referenceImages:[{uri,tag}]</code>（prompt 里用 <code>@tag</code>）</td></tr>
+<tr><td>返回</td><td><code>output</code> URL 数组，<b>24–48 小时过期</b>，须自行下载存储</td></tr>
+<tr><td>限流</td><td>并发按 tier/模型（Tier1=1，Tier3=5），<b>无每分钟请求上限</b>；24h 每日生成数 + 月度消费上限，超额 <b>429</b></td></tr>
+</table>
+<pre><code>curl -X POST https://api.dev.runwayml.com/v1/image_to_video -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $RUNWAYML_API_SECRET" -H "X-Runway-Version: 2024-11-06" \
+  -d '{"promptImage":"https://example.com/x.jpg","promptText":" timelapse","model":"gen4.5","ratio":"1280:720","duration":5}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Luma（两套官方 API 并存）</h3>
+<table>
+<tr><td></td><td><b>Dream Machine（旧，文档仍在）</b></td><td><b>Agents API（新）</b></td></tr>
+<tr><td>Base</td><td><code>https://api.lumalabs.ai/dream-machine/v1</code></td><td><code>https://agents.lumalabs.ai/v1</code></td></tr>
+<tr><td>端点</td><td><code>POST /generations</code>、<code>GET /generations/{id}</code>、<code>DELETE /generations/{id}</code></td><td><code>POST /generations</code>、<code>GET /generations/{id}</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer luma-xxxx</code></td><td><code>Authorization: Bearer $LUMA_AGENTS_API_KEY</code></td></tr>
+<tr><td>形态</td><td>异步，轮询读 <code>state</code>（<code>dreaming</code> → <code>completed</code>/<code>failed</code>），成功读 <code>assets.video</code></td><td>异步，读 <code>.state</code>，成功读 <code>.output[0].url</code></td></tr>
+<tr><td>webhook</td><td>请求带 <code>callback_url</code>，回调含 generation 对象；每状态可多次回调；非 200 最多重试 3 次</td><td>未取证</td></tr>
+<tr><td>参数</td><td><code>prompt</code>、<code>model</code>（默认 <code>ray-2</code>，另有 <code>ray-flash-2</code>）、<code>resolution</code>、<code>duration</code>、<code>aspect_ratio</code>、<code>keyframes.frame0</code>、<code>concepts[].key</code></td><td><code>model</code>（如 <code>ray-3.2</code>）、<code>type</code>（<code>video</code>/<code>image</code>/<code>image_edit</code>）、<code>prompt</code>、<code>source.url</code></td></tr>
+</table>
+<pre><code>curl --request POST --url https://api.lumalabs.ai/dream-machine/v1/generations \
+  --header 'accept: application/json' --header 'authorization: Bearer luma-xxxx' \
+  --header 'content-type: application/json' \
+  --data '{"prompt":"an old lady laughing underwater","model":"ray-2","resolution":"720p","duration":"5s"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Replicate（predictions）</h3>
+<table>
+<tr><td>端点</td><td>社区模型 <code>POST https://api.replicate.com/v1/predictions</code>；官方模型 <code>POST /v1/models/{owner}/{name}/predictions</code>；部署 <code>POST /v1/deployments/{owner}/{name}/predictions</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $REPLICATE_API_TOKEN</code></td></tr>
+<tr><td>形态</td><td>默认异步；<code>Prefer: wait</code> 头转同步（默认阻塞 60s，可 <code>Prefer: wait=5</code>）</td></tr>
+<tr><td>webhook</td><td>请求体 <code>"webhook"</code> + <code>"webhook_events_filter":["completed"]</code></td></tr>
+<tr><td>状态</td><td><code>starting</code> → <code>processing</code> → <code>successful</code> / <code>failed</code> / <code>canceled</code>；未完成时响应头 <code>Location</code> 给出查询地址</td></tr>
+<tr><td>参数</td><td>社区模型传 <code>version</code>，官方模型/部署直接传 <code>input</code>；<code>Cancel-After</code> 头可设 deadline（如 <code>1m30s</code>）</td></tr>
+<tr><td>限流</td><td>创建预测 <b>600 req/min</b>，其他端点 3000 req/min；超限 429；无付款方式账号限 1 req/s、≤6 req/min</td></tr>
+</table>
+<pre><code>curl -s -X POST -H 'Prefer: wait' -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+  -H 'Content-Type: application/json' https://api.replicate.com/v1/predictions \
+  -d '{"version":"5c7d...ccaa","input":{"text":"Alice"},"webhook":"https://my.server.com/h","webhook_events_filter":["completed"]}'</code></pre>
+</div>
+
+<div class="api">
+<h3>fal.ai（queue / 同步双模式）</h3>
+<table>
+<tr><td>端点</td><td>queue 提交 <code>POST https://queue.fal.run/{model_id}</code>；状态 <code>GET .../requests/{request_id}/status?logs=1</code>；结果 <code>GET .../requests/{request_id}</code>；取消 <code>PUT .../requests/{request_id}/cancel</code>。<b>同步 <code>POST https://fal.run/{model_id}</code></b></td></tr>
+<tr><td>鉴权</td><td><b><code>Authorization: Key $FAL_KEY</code></b>（<code>Key</code> 前缀，非 Bearer）</td></tr>
+<tr><td>提交返回</td><td><code>request_id</code>、<code>response_url</code>、<code>status_url</code>、<code>cancel_url</code>、<code>queue_position</code></td></tr>
+<tr><td>状态</td><td><code>IN_QUEUE</code>、<code>IN_PROGRESS</code>、<code>COMPLETED</code></td></tr>
+<tr><td>webhook</td><td>query 参数 <code>?fal_webhook=https://...</code>；回调体 <code>{request_id, status, payload}</code>，回调 <code>status</code> 为 <code>"OK"</code>/<code>"ERROR"</code>（与 queue 状态不同名）；用 <code>request_id</code> 做幂等</td></tr>
+<tr><td>其他</td><td><code>X-Fal-Request-Start-Timeout</code>（等待 runner 启动的绝对 deadline，超时 504；开始推理后不再计时）；<code>X-Fal-No-Retry: 1</code> 关闭重试</td></tr>
+</table>
+<pre><code>curl -X POST https://queue.fal.run/fal-ai/flux/schnell -H "Authorization: Key $FAL_KEY" \
+  -H "Content-Type: application/json" -d '{"prompt": "a sunset over mountains"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Pika 与 MiniMax 海外站</h3>
+<table>
+<tr><td></td><td><b>Pika</b></td><td><b>MiniMax 海外</b></td></tr>
+<tr><td>Base</td><td><code>https://api.dev.pika.art</code></td><td><code>https://api.minimax.io</code></td></tr>
+<tr><td>鉴权</td><td><b><code>X-API-Key: YOUR_API_KEY</code></b></td><td><code>Authorization: Bearer &lt;token&gt;</code></td></tr>
+<tr><td>端点</td><td>上传 <code>POST /v1/media/uploads</code>；生成 <code>POST /v1/media/{family}/{model}/{task}</code>；轮询 <code>GET /v1/media/jobs/{request_id}</code></td><td>提交 <code>POST /v1/video_generation</code>；查询 <code>GET /v1/query/video_generation</code></td></tr>
+<tr><td>状态</td><td><code>queued</code> / <code>running</code> / <code>completed</code> / <code>failed</code></td><td>查询返回 <code>status:"Success"</code> + <code>file_id</code></td></tr>
+<tr><td>要点</td><td><b>提交响应与 webhook 的 billing 为 null，只有轮询结算才计费</b>；上传 URL 5 分钟过期；429 后按 <code>Retry-After</code> 等待并用<b>新的 Idempotency-Key</b> 重试</td><td><code>model</code> <code>MiniMax-Hailuo-2.3</code>；prompt 支持 <code>[Pedestal up]</code> 运镜标记；<code>duration</code> 6、<code>resolution</code> 1080P</td></tr>
+</table>
+</div>
+
+<h2 id="s13">十二、API 调用方式 · OCR / 文档解析</h2>
+<div class="note">OCR 的调用方式比生成类更"重鉴权"：<span class="hl">阿里、腾讯、百度三家都需要自实现签名或 token 流程</span>，只有智谱与 Google 是简单 Bearer / api-key。另外<b>输入编码差异极大</b>：腾讯 JSON、百度 form-urlencoded、智谱两个端点一个 JSON 一个 multipart。</div>
+
+<div class="api">
+<h3>阿里云文字识别 OCR</h3>
+<table>
+<tr><td>端点</td><td><code>ocr-api.cn-hangzhou.aliyuncs.com</code>，Action=<code>RecognizeGeneral</code>（通用识别）或 <code>RecognizeAllText</code>（统一识别），Version=<code>2021-07-07</code></td></tr>
+<tr><td>鉴权</td><td>AK/SK + <b>ACS3-HMAC-SHA256 自签名</b>，或 SDK 传 AccessKeyId/Secret</td></tr>
+<tr><td>形态</td><td>同步</td></tr>
+<tr><td>输入</td><td><code>Url</code>（≤2048B，<b>不支持 base64</b>）或 <code>body</code> 二进制（≤10MB），二选一</td></tr>
+<tr><td>格式上限</td><td>PNG/JPG/JPEG/BMP/GIF/TIFF/WebP，<b>不支持 PDF</b>；边长 15–8192px，长宽比 &lt;50</td></tr>
+<tr><td>关键参数</td><td>RecognizeAllText 的 <code>Type</code> 为<b>必填单选</b>（<code>General</code>/<code>Advanced</code>/<code>HandWriting</code>/<code>Table</code>/<code>MultiLang</code>/<code>IdCard</code>…60+ 值）；<code>OutputCoordinate=points|rectangle</code>、<code>OutputOricoord</code>、<code>AdvancedConfig.{OutputRow,OutputParagraph,OutputTable,OutputCharInfo}</code></td></tr>
+<tr><td>返回</td><td>RecognizeGeneral：<code>Data</code>（string JSON）含 <code>content</code>、<code>prism_wordsInfo[]</code>。RecognizeAllText：<code>Data.SubImages[].BlockInfo.BlockDetails[]</code>、<code>KvInfo</code>、<code>TableInfo</code>；<b>无 Markdown 字段</b></td></tr>
+<tr><td>限流</td><td>元数据 <code>flowControl</code>：RecognizeAllText = 10 次 / 1 窗口</td></tr>
+</table>
+<pre><code># 签名 4 步（V3，逐字取自官方）
+# 1) CanonicalRequest = Method + '\n' + CanonicalURI + '\n' + CanonicalQueryString + '\n'
+#    + CanonicalHeaders + '\n' + SignedHeaders + '\n' + HexEncode(SHA256(RequestBody))
+#    （RPC 风格 CanonicalURI 固定 '/'；头名小写升序；空 body 用 e3b0c442...b855）
+# 2) StringToSign = "ACS3-HMAC-SHA256" + '\n' + HexEncode(SHA256(CanonicalRequest))
+# 3) Signature = HexEncode(HMAC-SHA256(AccessKeySecret, StringToSign))  # 密钥用原文，不做 Base64
+# 4) Authorization: ACS3-HMAC-SHA256 Credential=&lt;AK&gt;,SignedHeaders=host;x-acs-action;...,
+#    Signature=&lt;sig&gt;   # 头须含 host / x-acs-action / x-acs-content-sha256 / x-acs-date / x-acs-signature-nonce / x-acs-version</code></pre>
+</div>
+
+<div class="api">
+<h3>腾讯云 OCR 通用印刷体识别</h3>
+<table>
+<tr><td>端点</td><td><code>POST https://ocr.tencentcloudapi.com/</code>；<code>X-TC-Action: GeneralBasicOCR</code>，<code>X-TC-Version: 2018-11-19</code></td></tr>
+<tr><td>鉴权</td><td><b>TC3-HMAC-SHA256</b>（service=<code>ocr</code>）；SDK 用 SecretId/SecretKey</td></tr>
+<tr><td>形态</td><td>同步（直接返回结果，非轮询）</td></tr>
+<tr><td>输入</td><td><code>ImageBase64</code> 或 <code>ImageUrl</code>（同时给只用 Url）；base64 后 ≤10MB；PNG/JPG/JPEG/BMP/<b>PDF</b>；PDF 需 <code>IsPdf=true</code></td></tr>
+<tr><td>关键参数</td><td><code>LanguageType</code>（默认 zh；zh_rare/auto/mix/jap/kor…20 语种）、<code>IsWords</code>、<code>IsPdf</code>、<code>PdfPageNumber</code></td></tr>
+<tr><td>返回</td><td><code>Response.TextDetections[]</code>（<code>DetectedText</code>、<code>Confidence</code>、<code>ItemPolygon</code>、<code>Polygon[4]</code>、<code>AdvancedInfo</code>）、<code>Language</code>、<code>Angle</code></td></tr>
+<tr><td>限流</td><td><b>默认 20 次/秒</b></td></tr>
+</table>
+<pre><code># 签名 4 步：CanonicalRequest → StringToSign = "TC3-HMAC-SHA256"+'\n'+timestamp+'\n'+date+"/ocr/tc3_request"+'\n'+SHA256hex(CanonicalRequest)
+# 密钥派生：kDate=HMAC("TC3"+SecretKey, date) → kService=HMAC(kDate, service) → kSigning=HMAC(kService,"tc3_request")
+# 注意：date 必须是 X-TC-Timestamp 的 UTC+0 日期，偏差 &gt;5 分钟必失败
+curl -X POST https://ocr.tencentcloudapi.com \
+-H "Authorization: TC3-HMAC-SHA256 Credential=AKID***/2019-02-25/ocr/tc3_request, SignedHeaders=content-type;host;x-tc-action, Signature=***" \
+-H "Content-Type: application/json; charset=utf-8" -H "Host: ocr.tencentcloudapi.com" \
+-H "X-TC-Action: GeneralBasicOCR" -H "X-TC-Timestamp: 1551113065" \
+-H "X-TC-Version: 2018-11-19" -H "X-TC-Region: ap-guangzhou" \
+-d '{"ImageUrl":"https://ocr-demo-1254418846.cos.ap-guangzhou.myqcloud.com/general/GeneralBasicOCR/GeneralBasicOCR1.jpg"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>百度智能云 OCR 通用文字识别</h3>
+<table>
+<tr><td>端点</td><td><code>POST https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token=&lt;token&gt;</code>（高精度版 <code>accurate_basic</code>）</td></tr>
+<tr><td>鉴权</td><td><b>access_token 流程</b>（非 AK/SK 签名）：<code>GET https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&amp;client_id=&lt;AK&gt;&amp;client_secret=&lt;SK&gt;</code>，<b>有效期 30 天</b>，需自行缓存</td></tr>
+<tr><td>形态</td><td>同步</td></tr>
+<tr><td>输入</td><td><code>image</code>（base64+urlencode）&gt; <code>url</code> &gt; <code>pdf_file</code> &gt; <code>ofd_file</code> 四选一（<b>优先级即此</b>，image 存在则其余失效）；Content-Type <b><code>application/x-www-form-urlencoded</code></b></td></tr>
+<tr><td>关键参数</td><td><code>language_type</code>（默认 CHN_ENG）、<code>detect_direction</code>、<code>detect_language</code>、<code>paragraph</code>、<code>probability</code>、<code>pdf_file_num</code></td></tr>
+<tr><td>返回</td><td><code>log_id</code>、<code>words_result_num</code>、<code>words_result[].words</code>、<code>paragraphs_result</code>；<b>不返回坐标</b>（需用含位置版接口）</td></tr>
+</table>
+<pre><code>curl -i -k 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&amp;client_id=AK&amp;client_secret=SK'
+curl -X POST "https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token=$TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "image=$B64"</code></pre>
+</div>
+
+<div class="api">
+<h3>智谱 BigModel（GLM-OCR）</h3>
+<table>
+<tr><td></td><td><b>文档解析（推荐，返回 Markdown）</b></td><td><b>OCR 服务（返回行+坐标）</b></td></tr>
+<tr><td>端点</td><td><code>POST https://open.bigmodel.cn/api/paas/v4/layout_parsing</code></td><td><code>POST https://open.bigmodel.cn/api/paas/v4/files/ocr</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer &lt;API Key&gt;</code></td><td>同</td></tr>
+<tr><td>输入</td><td>JSON：<code>model:"glm-ocr"</code> + <code>file</code>（<b>url 或 base64</b>）；单图 ≤10MB、PDF ≤50MB 且 ≤100 页</td><td><b>multipart/form-data</b>：<code>file</code> + <code>tool_type</code>（必填，如 <code>hand_write</code>）</td></tr>
+<tr><td>关键参数</td><td><code>return_crop_images</code>、<code>need_layout_visualization</code>、<code>start_page_id</code>/<code>end_page_id</code></td><td><code>language_type</code>（CHN_ENG/AUTO…25 值）、<code>probability</code></td></tr>
+<tr><td>返回</td><td><code>md_results</code>（Markdown）、<code>layout_details[][].{label,bbox_2d,content}</code>、<code>data_info.num_pages</code></td><td><code>task_id</code>、<code>status</code>、<code>words_result[].{words,location,probability}</code></td></tr>
+</table>
+<pre><code>curl --request POST --url https://open.bigmodel.cn/api/paas/v4/layout_parsing \
+  --header 'Authorization: Bearer &lt;token&gt;' --header 'Content-Type: application/json' \
+  --data '{"model":"glm-ocr","file":"https://cdn.bigmodel.cn/static/logo/introduction.png"}'</code></pre>
+</div>
+
+<div class="api">
+<h3>Azure AI Document Intelligence</h3>
+<table>
+<tr><td>端点</td><td><code>POST {endpoint}/documentintelligence/documentModels/{modelId}:analyze?_overload=analyzeDocument&amp;api-version=2024-11-30</code>（Read 用 <code>modelId=prebuilt-read</code>）</td></tr>
+<tr><td>鉴权</td><td>头 <code>Ocp-Apim-Subscription-Key: &lt;key&gt;</code> 或 OAuth2；SDK <code>DocumentIntelligenceClient(endpoint, AzureKeyCredential(key))</code></td></tr>
+<tr><td>形态</td><td><b>异步</b>：202 + 响应头 <code>Operation-Location</code> + <code>Retry-After</code>，再 <code>GET .../analyzeResults/{resultId}</code></td></tr>
+<tr><td>输入</td><td>body JSON：<code>urlSource</code> 或 <code>base64Source</code> 二选一；PDF/TIFF ≤2000 页（F0 仅 2 页）；≤500MB(S0)/4MB(F0)</td></tr>
+<tr><td>关键参数</td><td>query：<code>pages=1-2,4</code>、<code>locale</code>、<code>features</code>（<code>ocrHighResolution,languages,barcodes,formulas,keyValuePairs,styleFont,queryFields</code>）、<code>outputContentFormat=markdown|text</code>、<code>output=pdf|figures</code></td></tr>
+<tr><td>返回</td><td><code>content</code>（整文）、<code>pages[].{lines[],words[]{content,polygon,confidence}}</code>、<code>paragraphs</code>、<code>styles</code>、<code>tables</code></td></tr>
+</table>
+<pre><code>poller = client.begin_analyze_document("prebuilt-read", AnalyzeDocumentRequest(url_source=formUrl))
+result = poller.result()</code></pre>
+</div>
+
+<div class="api">
+<h3>AWS Textract</h3>
+<table>
+<tr><td></td><td><b>DetectDocumentText（纯文本，同步）</b></td><td><b>AnalyzeDocument（表单/表格/签名，同步）</b></td></tr>
+<tr><td>SDK 方法</td><td><code>client.detect_document_text(Document={...})</code></td><td><code>analyze_document(Document={...}, FeatureTypes=[...])</code>；异步用 <code>StartDocumentAnalysis</code></td></tr>
+<tr><td>鉴权</td><td colspan="2">boto3 凭据链（profile/环境变量/IAM Role），SigV4 由 SDK 完成</td></tr>
+<tr><td>输入</td><td><code>Bytes</code>（≤5MB，<b>仅 PNG/JPEG</b>）或 <code>S3Object{Bucket,Name}</code>；CLI 不能传 image bytes</td><td><code>Bytes</code> 或 <code>S3Object</code>；JPEG/PNG/PDF/TIFF</td></tr>
+<tr><td>参数</td><td>—</td><td><code>FeatureTypes</code> <b>必填</b>：<code>TABLES|FORMS|QUERIES|SIGNATURES|LAYOUT</code></td></tr>
+<tr><td>返回</td><td><code>Blocks[]</code>（<code>Text</code>、<code>Confidence</code>、<code>Geometry.BoundingBox</code> 归一化）、<code>DocumentMetadata.Pages</code></td><td>同上 + 表格 <code>CELL</code> 行列、键值 <code>KEY_VALUE_SET</code></td></tr>
+<tr><td>上限</td><td colspan="2">同步 ≤10MB（异步 PDF ≤500MB）；超流抛 <code>ProvisionedThroughputExceededException</code>，QPS 数值未取证</td></tr>
+</table>
+<pre><code>import boto3
+client = boto3.client('textract', region_name='us-east-1')
+response = client.detect_document_text(Document={'S3Object': {'Bucket': bucket, 'Name': document}})
+client.analyze_document(Document={'Bytes': image_binary}, FeatureTypes=['TABLES','FORMS'])</code></pre>
+</div>
+
+<div class="api">
+<h3>Google Cloud Vision 与 PaddleOCR</h3>
+<table>
+<tr><td></td><td><b>Google Cloud Vision</b></td><td><b>PaddleOCR（本地 / 托管）</b></td></tr>
+<tr><td>端点</td><td><code>POST https://vision.googleapis.com/v1/images:annotate</code></td><td>本地 CLI / Python SDK；官方托管 API 走 <code>PaddleOCRClient</code></td></tr>
+<tr><td>鉴权</td><td><code>Authorization: Bearer $(gcloud auth print-access-token)</code> + <code>x-goog-user-project: PROJECT_ID</code></td><td>托管 API 用 <code>PADDLEOCR_ACCESS_TOKEN</code> 环境变量（缺则抛 <code>AuthError</code>）</td></tr>
+<tr><td>形态</td><td>同步（可 <code>requests[]</code> 批量）；PDF/TIFF 异步 <code>files:asyncBatchAnnotate</code> 未取证</td><td>本地同步；托管 API 支持 <code>submit_ocr()</code> 异步 + <code>wait_ocr_result()</code></td></tr>
+<tr><td>输入</td><td><code>image.content</code>=base64 或 <code>image.source.imageUri</code>（gs://）</td><td><code>file_path</code> 或 <code>file_url</code> 二选一</td></tr>
+<tr><td>关键参数</td><td><code>features[].type</code>=<code>TEXT_DETECTION</code>（任意图）/ <code>DOCUMENT_TEXT_DETECTION</code>（密集文档，返回 page/block/paragraph/word）</td><td>本地 <code>PaddleOCR(use_doc_orientation_classify=False, engine="paddle")</code>；文档解析用 <code>PPStructureV3()</code> + <code>save_to_markdown()</code></td></tr>
+<tr><td>返回</td><td><code>responses[].textAnnotations[]</code>（首个为整段全文）、<code>fullTextAnnotation.pages[]</code></td><td>本地键：<code>rec_texts</code>、<code>rec_scores</code>、<code>rec_polys</code>/<code>rec_boxes</code>、<code>dt_polys</code></td></tr>
+</table>
+<pre><code>curl -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "x-goog-user-project: PROJECT_ID" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d @request.json "https://vision.googleapis.com/v1/images:annotate"
+# request.json: {"requests":[{"image":{"content":"BASE64"},"features":[{"type":"TEXT_DETECTION"}]}]}
+
+paddleocr ocr -i ./general_ocr_002.png --use_doc_orientation_classify False --use_doc_unwarping False --engine paddle</code></pre>
+</div>
+
+<h2 id="s14">十三、调用方式的横向规律</h2>
+<div class="note">
+<b>① 鉴权只有三类，但决定要不要引 SDK。</b><br>
+· <b>Bearer 直通</b>（绝大多数）：阿里百炼、火山、智谱、MiniMax、千帆、可灵新版、OpenAI、Runway、Luma、Replicate<br>
+· <b>自定义头</b>（非 Bearer，最容易写错）：Google <code>x-goog-api-key</code>、BFL <code>x-key</code>、fal.ai <code>Authorization: Key</code>、Pika <code>X-API-Key</code>、Azure <code>Ocp-Apim-Subscription-Key</code><br>
+· <b>必须自实现签名</b>（不引 SDK 就得手写）：腾讯 TC3-HMAC-SHA256（<code>date</code> 取 UTC，偏差 &gt;5 分钟失败）、阿里 ACS3-HMAC-SHA256（<code>x-acs-content-sha256</code> 必须等于 body 的 SHA256）、百度 access_token（有效期 30 天需缓存）<br><br>
+
+<b>② 异步三分法。</b><br>
+· <b>自建 task_id + 轮询</b>（主流）：阿里百炼、火山视频、腾讯混元、智谱异步、Azure DI、可灵、千帆视频、MiniMax、Luma、Pika<br>
+· <b>平台原生 Operation 对象</b>：Google Veo（<code>operations.get()</code>，看 <code>done</code>）、BFL（必须用返回的 <code>polling_url</code>）<br>
+· <b>提交即返全套 URL</b>：fal.ai（<code>status_url</code> / <code>response_url</code> 一次给全）、Replicate（响应头 <code>Location</code>）<br><br>
+
+<b>③ 结果 URL 有效期是集成设计的关键约束。</b><br>
+<span class="hl">腾讯混元 1 小时</span> &gt; BFL 10 分钟（最短）&gt; 阿里/火山/千帆/可灵 24 小时 &gt; Runway 24–48 小时 &gt; 可灵内容 30 天后清理。<b>务必在收到结果后立刻转存自己的存储</b>，不要把厂商 URL 直接存进数据库当长期地址。<br><br>
+
+<b>④ 返回形态决定客户端处理方式。</b><br>
+· <b>base64 直返</b>：OpenAI（<code>b64_json</code>）、Gemini 图像（<code>inlineData</code>）<br>
+· <b>二进制流</b>：Stability（<code>accept: image/*</code> 直接是图像字节）<br>
+· <b>URL</b>：国内几乎全部、Runway、Luma、Replicate、fal.ai、Pika<br>
+· <b>file_id 再换下载</b>：MiniMax 旧版<br><br>
+
+<b>⑤ 编码格式不能想当然。</b>腾讯 OCR 与 OpenAI 图像编辑是 JSON + multipart 并存；百度 OCR 是 <code>application/x-www-form-urlencoded</code> 且要 urlencode；Stability 是 multipart 且需 <code>files={"none": ''}</code> 占位；智谱两个 OCR 端点一个 JSON 一个 multipart——<b>混用直接 400</b>。<br><br>
+
+<b>⑥ 回调是省轮询的正路，但各家字段名不统一。</b>可灵 <code>callback_url</code>、Luma <code>callback_url</code>、Replicate <code>webhook</code> + <code>webhook_events_filter</code>、fal.ai <code>?fal_webhook=</code>、BFL <code>webhook_url</code> + <code>webhook_secret</code>。注意 <span class="hl">fal.ai 回调里的 <code>status</code> 是 <code>"OK"</code>/<code>"ERROR"</code>，与 queue 状态 <code>IN_QUEUE</code>/<code>COMPLETED</code> 不同名</span>。
+</div>
+
+<h2 id="s10">十四、取证局限与来源声明</h2>
+<div class="note">
+<b>1. HuggingFace 全环境不可达。</b>所有权重链接均为 README 原文转录，未逐个验证可下载性；HF 侧的许可与发布日期亦无法取证。<br>
+<b>2. GitHub API 未认证限额（60/小时）中途耗尽。</b>因此本报告不采用任何 GitHub API 时间戳作为发布日期，「发布 / 更新」仅来自 README 更新日志或 LICENSE 日期。<br>
+<b>3. 以下官方价目未取到：</b>阿里云百炼万相 / Qwen 图像与视频的完整新价目表（页面在采集时被截断，报告采用口径一致的另一轮检索所得）、快手可灵官方刊例（仅有 fal.ai 等第三方渠道价）、Stability 定价页（JS 空壳）、Luma 与 Pika 官网（fetch 层失败，Luma 数据来自检索快照）、商汤图像 / 视频单价、讯飞「每点单价」、腾讯混元生视频。<br>
+<b>4. Civitai 通道被拒。</b>SDXL 微调生态（Illustrious、Pony 系列权重、下载量、许可）整体未取证。<br>
+<b>5. 已确认不存在自研开源图像 / 视频生成权重的厂商：</b>商汤（GitHub org 仅 .github）、MiniMax、月之暗面、华为 Ascend、面壁 OpenBMB；Google（google-deepmind 仅 Gemma 系 LLM）、Meta（facebookresearch 为 SAM / DINO 等感知类）、Microsoft、Adobe 亦无消费级开源图像视频生成权重。<br>
+<b>6. 显存字段口径约定：</b>标注「未取证」表示官方未公布且本报告不填社区估算；标注「社区」者为第三方量化或推理引擎口径，可能与官方实测有出入。所有价格币种随原页面（元 / 美元）。
+</div>
+
+<p class="fn">
+<b>主要来源</b>：GitHub raw README 与 LICENSE 原文（Wan-Video、Tencent-Hunyuan、zai-org、Kwai-Kolors、SkyworkAI、meituan-longcat、black-forest-labs、NVlabs、Lightricks、genmoai、lllyasviel、deepbeepmeep、Comfy-Org、mit-han-lab、city96、Stability-AI、apple/ml-stable-diffusion、PaddlePaddle、Ucas-HaoranWei、rednote-hilab、opendatalab、datalab-to、allenai、tesseract-ocr、mindee/doctr、hiroi-sora、breezedeus、facebookresearch/nougat、bytedance-seed、stepfun-ai、OpenGVLab、Alpha-VLLM、deepseek-ai）；官方定价与计费文档（阿里云百炼模型价格页、火山方舟模型价格页、腾讯云混元生图 1668/90896 与 OCR 866/17619、百度千帆图像生成积分价目与智能云 OCR 计费、智谱 BigModel 定价与 OCR 工具、MiniMax 平台文档、Kling 开放平台定价页、OpenAI、Google Gemini 与 Cloud Vision、Azure Document Intelligence 与 AI Vision、AWS Textract、Runway、Replicate、fal.ai、Stability、Black Forest Labs）；PaddleOCR 官方文档站硬件矩阵与 Apple Silicon 专页；ModelScope 模型详情 API。<br>
+价格为 2026-10-13 抓取快照。厂商调价频繁，采购前请复核原页面。
+</p>
+
+</div>
+</div>
+<script>
+(function(){
+  var UNITS = {'k':1e3,'K':1e3,'M':1e6,'m':1e6,'\u4e07':1e4,'\u4ebf':1e8};
+  // 启发式解析：单位字母后不得紧跟字母（避免把 "803Krea" 的 K 当成千）
+  function numOf(txt){
+    if(!txt) return null;
+    var t = txt.replace(/,/g,'');
+    if(/\u672a\u53d6\u8bc1|gated/.test(t)) return null;
+    var re = /(\d+(?:\.\d+)?)\s*(\u4ebf|\u4e07|(?:[kKmM](?![A-Za-z])))?/g, m, best = null;
+    while((m = re.exec(t)) !== null){
+      var v = parseFloat(m[1]);
+      if(isNaN(v)) continue;
+      var u = m[2];
+      if(u && UNITS[u]) v = v * UNITS[u];
+      if(best === null || v > best) best = v;
+    }
+    return best;
+  }
+  function cellKey(tr, i){
+    var c = tr.cells[i];
+    if(!c) return {has:false, num:null, txt:''};
+    var txt = c.textContent.replace(/\s+/g,' ').trim();
+    if(c.hasAttribute('data-sort')){
+      var raw = c.getAttribute('data-sort');
+      if(raw === '') return {has:true, num:null, txt:txt};
+      return {has:true, num:parseFloat(raw), txt:txt};
+    }
+    return {has:false, num:numOf(txt), txt:txt};
+  }
+  function sortTable(tbl){
+    var rows = Array.prototype.slice.call(tbl.rows);
+    var headerRow = null, body = [];
+    for(var i=0;i<rows.length;i++){
+      if(!headerRow && rows[i].querySelector('th')) headerRow = rows[i];
+      else if(!rows[i].querySelector('th')) body.push(rows[i]);
+    }
+    if(!headerRow || body.length < 3) return;
+    var ths = headerRow.querySelectorAll('th');
+    if(ths.length < 3) return;
+
+    var original = body.slice();
+    var state = {};
+
+    function resetAll(){
+      for(var k in state) state[k] = 0;
+      for(var j=0;j<ths.length;j++) ths[j].classList.remove('asc','desc');
+    }
+
+    for(var ci=0; ci<ths.length; ci++){
+      (function(idx){
+        var th = ths[idx];
+        var withAttr = 0, numNon = 0;
+        for(var r=0;r<body.length;r++){
+          var k = cellKey(body[r], idx);
+          if(k.has) withAttr++;
+          if(k.num !== null) numNon++;
+        }
+        // 显式给出排序键的列一律按数值排（未取证恒末位）；
+        // 否则按 50% 阈值启发式判别，避免把稀疏数值列误判成文本列
+        var isNum = withAttr > 0 ? (numNon > 0) : (numNon / body.length >= 0.5);
+        th.classList.add('sortable');
+        th.title = (isNum ? '数值排序' : '文本排序') + '（\u672a\u53d6\u8bc1 \u6052\u6392\u672b\u4f4d\uff09';
+
+        th.addEventListener('click', function(){
+          var next = (state[idx] || 0) + 1;
+          if(next > 2) next = 0;
+          resetAll();
+          state[idx] = next;
+          if(next === 0){ original.forEach(function(tr){ tbl.appendChild(tr); }); return; }
+          th.classList.add(next === 1 ? 'asc' : 'desc');
+          var sorted = body.slice().sort(function(a,b){
+            var ka = cellKey(a, idx), kb = cellKey(b, idx);
+            var an = (ka.num === null), bn = (kb.num === null);
+            if(isNum){
+              if(an && bn) return 0;
+              if(an) return 1;   // 未取证/无数据恒末位
+              if(bn) return -1;
+            } else {
+              if(ka.txt === '' && kb.txt !== '') return 1;
+              if(kb.txt === '' && ka.txt !== '') return -1;
+            }
+            var c = isNum ? (ka.num - kb.num) : ka.txt.localeCompare(kb.txt, 'zh-Hans-CN');
+            return next === 1 ? c : -c;
+          });
+          sorted.forEach(function(tr){ tbl.appendChild(tr); });
+        });
+      })(ci);
+    }
+  }
+  var tables = document.querySelectorAll('table');
+  for(var t=0;t<tables.length;t++) sortTable(tables[t]);
+
+  // 每张可排序表前加提示（表级 data-sorthint 优先）
+  for(var q=0;q<tables.length;q++){
+    var tb = tables[q];
+    if(!tb.querySelector('th.sortable')) continue;
+    var tip = document.createElement('p');
+    tip.className = 'sorthint';
+    var custom = tb.getAttribute('data-sorthint');
+    tip.textContent = '\u70b9\u51fb\u8868\u5934\u6392\u5e8f\uff1a\u5347\u5e8f \u2192 \u964d\u5e8f \u2192 \u6062\u590d\u539f\u5e8f' + (custom ? '\u3002' + custom : '');
+    tb.parentNode.insertBefore(tip, tb);
+  }
+})();
+</script>
+<script>
+(function(){
+  var links = [].slice.call(document.querySelectorAll('.sbtoc a'));
+  if(!links.length) return;
+  var targets = links.map(function(a){
+    var href = a.getAttribute('href') || '';
+    return href.charAt(0) === '#' ? document.querySelector(href) : null;
+  });
+  var ticking = false;
+  function update(){
+    ticking = false;
+    var probe = window.scrollY + 140;
+    var cur = 0;   // 默认高亮第一项，避免顶部无高亮
+    for(var i=0;i<targets.length;i++){
+      if(targets[i] && targets[i].offsetTop <= probe) cur = i;
+    }
+    // 滚到底部时强制高亮最后一项
+    if(window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) cur = targets.length - 1;
+    for(var j=0;j<links.length;j++){
+      if(j === cur) links[j].classList.add('on');
+      else links[j].classList.remove('on');
+    }
+  }
+  function onScroll(){
+    if(!ticking){ ticking = true; window.requestAnimationFrame(update); }
+  }
+  window.addEventListener('scroll', onScroll, {passive:true});
+  window.addEventListener('resize', onScroll);
+  update();
+})();
+</script>
+</body>
+</html>
