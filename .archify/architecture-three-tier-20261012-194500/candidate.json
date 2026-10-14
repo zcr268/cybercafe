@@ -1,0 +1,471 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CyberCafe 三层控制演进 · 组件级架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-three-tier-20261012-194500/three-tier-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/zcr268/cybercafe.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "cfd0e15727bc3cf139a4ad5d77e89e8d52316dcb"
+    }
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "API 客户端",
+      "sublabel": "提交 / 轮询",
+      "pos": [
+        0,
+        250
+      ],
+      "size": [
+        110,
+        64
+      ]
+    },
+    {
+      "id": "l1-dist",
+      "type": "cloud",
+      "label": "最高分发节点",
+      "sublabel": "脚本 / 镜像 / 权重",
+      "pos": [
+        1210,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L1"
+    },
+    {
+      "id": "l1-identity",
+      "type": "cloud",
+      "label": "L2 身份注册",
+      "sublabel": "签发 L2 身份",
+      "pos": [
+        185,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L1"
+    },
+    {
+      "id": "l1-reserve",
+      "type": "cloud",
+      "label": "预留机策略",
+      "sublabel": "档位最少台数",
+      "pos": [
+        595,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L1"
+    },
+    {
+      "id": "l1-batch",
+      "type": "cloud",
+      "label": "批次码签发",
+      "sublabel": "L1 完整 · 识别来源",
+      "pos": [
+        1005,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L1"
+    },
+    {
+      "id": "l1-console",
+      "type": "cloud",
+      "label": "全局大盘",
+      "sublabel": "机房聚合 · 任务统计",
+      "pos": [
+        800,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L1"
+    },
+    {
+      "id": "l2-cache",
+      "type": "database",
+      "label": "缓存层",
+      "sublabel": "镜像+权重 · 指纹/键",
+      "pos": [
+        1210,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "l2-api",
+      "type": "security",
+      "label": "统一 API 网关",
+      "sublabel": "CF 隧道 · Key · 限流",
+      "pos": [
+        185,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "l2-queue",
+      "type": "backend",
+      "label": "任务队列",
+      "sublabel": "池满排队",
+      "pos": [
+        390,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "l2-sched",
+      "type": "backend",
+      "label": "任务调度器",
+      "sublabel": "模型池 · 负载最少",
+      "pos": [
+        595,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "l2-proxy",
+      "type": "backend",
+      "label": "组件适配层",
+      "sublabel": "统一契约→各后端",
+      "pos": [
+        800,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "l2-state",
+      "type": "database",
+      "label": "本机房状态",
+      "sublabel": "设备/任务/批次/心跳",
+      "pos": [
+        1005,
+        250
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L2"
+    },
+    {
+      "id": "ocr",
+      "type": "backend",
+      "label": "OCR",
+      "sublabel": "PaddleOCR / RapidOCR",
+      "pos": [
+        390,
+        600
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L3",
+      "sources": [
+        {
+          "path": "ocr/install.sh",
+          "line": 1,
+          "end_line": 15,
+          "label": "RapidOCR 容器"
+        }
+      ]
+    },
+    {
+      "id": "t2i",
+      "type": "backend",
+      "label": "文生图",
+      "sublabel": "OpenAI Images 兼容",
+      "pos": [
+        595,
+        600
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L3"
+    },
+    {
+      "id": "t2v",
+      "type": "backend",
+      "label": "文生视频",
+      "sublabel": "ComfyUI 工作流",
+      "pos": [
+        800,
+        600
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L3"
+    },
+    {
+      "id": "h3",
+      "type": "backend",
+      "label": "H3 生成",
+      "sublabel": "sd-server · vid_gen",
+      "pos": [
+        1005,
+        600
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "L3",
+      "sources": [
+        {
+          "path": "minimax-h3/README.md",
+          "line": 23,
+          "end_line": 24,
+          "label": "sd-server 11435 · vid_gen"
+        }
+      ]
+    },
+    {
+      "id": "l3-agent",
+      "type": "backend",
+      "label": "工作机控制",
+      "sublabel": "心跳 · 执行 · 上报",
+      "pos": [
+        795,
+        430
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "tag": "L3"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "L1 云控制（多网吧全局）",
+      "wraps": [
+        "l1-dist",
+        "l1-identity",
+        "l1-reserve",
+        "l1-batch",
+        "l1-console"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "region",
+      "label": "L2 网吧控制（本期单点 · 后话对等集群）",
+      "wraps": [
+        "l2-cache",
+        "l2-api",
+        "l2-queue",
+        "l2-sched",
+        "l2-proxy",
+        "l2-state"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "region",
+      "label": "L3 工作机（无公网暴露）",
+      "wraps": [
+        "ocr",
+        "t2i",
+        "t2v",
+        "h3",
+        "l3-agent"
+      ],
+      "pad": 18
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-submit",
+      "from": "client",
+      "to": "l2-api",
+      "label": "API Key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "enqueue",
+      "from": "l2-api",
+      "to": "l2-queue",
+      "label": "入队"
+    },
+    {
+      "id": "dequeue",
+      "from": "l2-queue",
+      "to": "l2-sched",
+      "label": "出队调度"
+    },
+    {
+      "id": "dispatch",
+      "from": "l2-sched",
+      "to": "l2-proxy",
+      "label": "选定适配器",
+      "variant": "emphasis"
+    },
+    {
+      "id": "invoke",
+      "from": "l2-proxy",
+      "to": "l3-agent",
+      "label": "任务执行调用",
+      "variant": "emphasis"
+    },
+    {
+      "id": "run-ocr",
+      "from": "l3-agent",
+      "to": "ocr",
+      "label": "OCR 推理"
+    },
+    {
+      "id": "run-t2i",
+      "from": "l3-agent",
+      "to": "t2i",
+      "label": "文生图"
+    },
+    {
+      "id": "run-t2v",
+      "from": "l3-agent",
+      "to": "t2v",
+      "label": "文生视频"
+    },
+    {
+      "id": "run-h3",
+      "from": "l3-agent",
+      "to": "h3",
+      "label": "H3 生成"
+    },
+    {
+      "id": "report-up",
+      "from": "l3-agent",
+      "to": "l2-proxy",
+      "label": "进度 / 结果回传",
+      "variant": "dashed"
+    },
+    {
+      "id": "heartbeat-state",
+      "from": "l3-agent",
+      "to": "l2-state",
+      "label": "注册 / 心跳",
+      "variant": "dashed"
+    },
+    {
+      "id": "aggregate",
+      "from": "l2-state",
+      "to": "l1-console",
+      "label": "聚合上报 / 策略下发",
+      "variant": "dashed"
+    },
+    {
+      "id": "reserve-push",
+      "from": "l1-reserve",
+      "to": "l2-sched",
+      "label": "预留机配置",
+      "variant": "dashed"
+    },
+    {
+      "id": "identity-issue",
+      "from": "l1-identity",
+      "to": "l2-api",
+      "label": "L2 身份签发",
+      "variant": "dashed"
+    },
+    {
+      "id": "batch-push",
+      "from": "l1-batch",
+      "to": "l2-state",
+      "label": "批次码",
+      "variant": "dashed"
+    },
+    {
+      "id": "dist-cache",
+      "from": "l1-dist",
+      "to": "l2-cache",
+      "label": "镜像/权重分发",
+      "variant": "dashed"
+    },
+    {
+      "id": "cache-pull",
+      "from": "l2-cache",
+      "to": "h3",
+      "label": "镜像/权重拉取",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "任务生命周期",
+      "items": [
+        "POST /v1/tasks → API Key 鉴权 → 入队 → 调度器查模型池",
+        "池 = 已部署该档位的机器，池内负载最少优先，池满排队",
+        "下发 L3 执行 → 进度/结果回传 → 客户端轮询取回"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "缓存两层（全组件通用）",
+      "items": [
+        "镜像层按规格指纹（GPU+显存+驱动+内存+CPU）免构建",
+        "权重层按 (组件,模型,版本) 键免下载，OCR/ComfyUI/H3 全纳入",
+        "L3 部署与模型加载命中缓存直接拉取"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "本期边界",
+      "items": [
+        "无文生文 / 无 SSE 流式；无跨网吧调度；无配额阈值",
+        "L2 单点（对等集群后话）；L3 无公网暴露、无降级直连",
+        "结果回传先轮询；预留机保护已知流量高峰"
+      ]
+    }
+  ]
+}
