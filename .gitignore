@@ -1,19 +1,8 @@
 deploy/aliyun/.env
 
 # 工具与团队运行时产物（不进库）
+.archify/
 .agent-teams/
 .dsh-worktrees/
 .dsh-vision-router/
 _evidence/
-
-# archify 每轮 final/visual 证据目录不进库；候选源档 candidate.json 保留
-.archify/**/final*/
-.archify/**/visual*/
-.archify/**/*.finalize.json
-.archify/**/*.finalize-summary.json
-.archify/**/*.browser-check.json
-.archify/**/*.visual-check.json
-.archify/**/*.visual-check.html
-.archify/**/*.visual-check.*.png
-.archify/**/*.delivery.json
-.archify/**/*-architecture.html
